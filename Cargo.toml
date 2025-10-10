@@ -10,4 +10,4 @@ logos = "0.15.1"
 
 [profile.dev]
 opt-level = 1
-codegen-backend = "cranelift"
+# codegen-backend = "cranelift"
