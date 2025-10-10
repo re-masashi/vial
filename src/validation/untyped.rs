@@ -1,0 +1,782 @@
+use std::collections::HashMap;
+use std::ops::Range;
+use std::path::{Path, PathBuf};
+
+use super::errors::*;
+use super::imports::*;
+use crate::ast::*;
+
+#[derive(Debug)]
+pub struct UntypedValidator {
+    defined_items: HashMap<String, Range<usize>>,
+    module_resolver: ModuleResolver,
+    macros: HashMap<String, MacroDef>,
+    in_loop: bool,
+    in_function: bool,
+    in_user_function: bool, // either in user-defined function (true) vs auto-generated main (fals)
+    current_file: String,
+
+    pub diagnostics: ValidationDiagnostics,
+}
+
+impl UntypedValidator {
+    pub fn new(project_root: PathBuf) -> Self {
+        Self {
+            defined_items: HashMap::new(),
+            module_resolver: ModuleResolver::new(&project_root),
+            macros: HashMap::new(),
+            in_loop: false,
+            in_function: false,
+            in_user_function: false,
+            current_file: String::new(),
+            diagnostics: ValidationDiagnostics::new(),
+        }
+    }
+
+    pub fn validate(&mut self, nodes: Vec<ASTNode>, current_file: &Path) -> Vec<ASTNode> {
+        self.current_file = current_file.display().to_string();
+
+        self.collect_macros(&nodes);
+
+        let expanded = self.expand_macros(nodes);
+
+        let desugared = self.desugar(expanded);
+
+        let with_imports = self
+            .module_resolver
+            .resolve_imports(desugared, current_file);
+
+        let validated = self.validate_nodes(with_imports);
+
+        self.diagnostics
+            .errors
+            .append(&mut self.module_resolver.diagnostics.errors);
+        self.diagnostics
+            .warnings
+            .append(&mut self.module_resolver.diagnostics.warnings);
+
+        validated
+    }
+
+    fn desugar(&mut self, nodes: Vec<ASTNode>) -> Vec<ASTNode> {
+        let mut exprs = Vec::new();
+        let mut other_nodes = Vec::new();
+
+        for node in nodes {
+            match node.node {
+                ASTNodeKind::Expr(expr) => {
+                    match expr.expr {
+                        ExprKind::Import(_) => {
+                            // `import` expressions should NEVER be treated as "executable" (idk a better term for this) expressions
+                            // they should remain as separate nodes to be processed during import resolution
+                            other_nodes.push(ASTNode {
+                                span: node.span.clone(),
+                                file: node.file.clone(),
+                                node: ASTNodeKind::Expr(expr),
+                                attributes: node.attributes.clone(),
+                            });
+                        }
+                        _ => {
+                            exprs.push(expr);
+                        }
+                    }
+                }
+                ASTNodeKind::Function(ref func_box) => {
+                    if func_box.as_ref().name == "main" {
+                        // mangle the explicit main function name to avoid conflicts
+                        let mangled_func = Function {
+                            name: "__mangled_main__".to_string(),
+                            ..func_box.as_ref().clone()
+                        };
+                        other_nodes.push(ASTNode {
+                            span: node.span.clone(),
+                            file: node.file.clone(),
+                            node: ASTNodeKind::Function(Box::new(mangled_func)),
+                            attributes: node.attributes.clone(),
+                        });
+                    } else {
+                        other_nodes.push(node);
+                    }
+                }
+                ASTNodeKind::Struct(ref s) => {
+                    let (clean_struct, impl_block) = self.desugar_struct(s.clone(), &node);
+
+                    other_nodes.push(ASTNode {
+                        span: node.span.clone(),
+                        file: node.file.clone(),
+                        node: ASTNodeKind::Struct(clean_struct),
+                        attributes: node.attributes.clone(),
+                    });
+
+                    if let Some(impl_node) = impl_block {
+                        other_nodes.push(impl_node);
+                    }
+                }
+
+                ASTNodeKind::Enum(ref e) => {
+                    let (clean_enum, impl_block) = self.desugar_enum(e.clone(), &node);
+
+                    other_nodes.push(ASTNode {
+                        span: node.span.clone(),
+                        file: node.file.clone(),
+                        node: ASTNodeKind::Enum(clean_enum),
+                        attributes: node.attributes.clone(),
+                    });
+
+                    if let Some(impl_node) = impl_block {
+                        other_nodes.push(impl_node);
+                    }
+                }
+
+                _ => other_nodes.push(node),
+            }
+        }
+
+        // CReate a main function only if there are top-level expressions
+        // or maybe i can create a main with just `return 0`?
+        if !exprs.is_empty() {
+            let main_function = self.create_main_function(exprs);
+            other_nodes.push(main_function);
+        }
+
+        other_nodes
+    }
+
+    fn create_main_function(&self, exprs: Vec<Expr>) -> ASTNode {
+        let block_expr = Expr {
+            span: if exprs.is_empty() {
+                0..0
+            } else {
+                exprs[0].span.clone()
+            },
+            file: if exprs.is_empty() {
+                String::new()
+            } else {
+                exprs[0].file.clone()
+            },
+            expr: ExprKind::Block(exprs.clone()),
+        };
+
+        let function = Function {
+            span: if exprs.is_empty() {
+                0..0
+            } else {
+                exprs[0].span.clone()
+            },
+            file: if exprs.is_empty() {
+                String::new()
+            } else {
+                exprs[0].file.clone()
+            },
+            vis: Visibility::Public, // main should always be public ig
+            name: "main".to_string(),
+            type_params: vec![],
+            args: vec![],
+            return_type: None,
+            where_constraints: vec![],
+            effects: EffectAnnot::pure(),
+            body: Some(block_expr),
+        };
+
+        ASTNode {
+            span: if exprs.is_empty() {
+                0..0
+            } else {
+                exprs[0].span.clone()
+            },
+            file: if exprs.is_empty() {
+                String::new()
+            } else {
+                exprs[0].file.clone()
+            },
+            node: ASTNodeKind::Function(Box::new(function)),
+            attributes: vec![],
+        }
+    }
+
+    fn desugar_struct(&mut self, struct_def: Struct, node: &ASTNode) -> (Struct, Option<ASTNode>) {
+        if struct_def.methods.is_empty() {
+            return (struct_def, None);
+        }
+
+        // check for duplicate methodnames
+        let mut seen_methods: HashMap<String, Range<usize>> = HashMap::new();
+        for method in &struct_def.methods {
+            if let Some(existing) = seen_methods.get(&method.name) {
+                self.diagnostics.add_error(ValidationError {
+                    span: method.span.clone(),
+                    file: method.file.clone(),
+                    kind: ValidationErrorKind::DuplicateDefinition {
+                        name: method.name.clone(),
+                        first_defined: existing.clone(),
+                    },
+                });
+            } else {
+                seen_methods.insert(method.name.clone(), method.span.clone());
+            }
+        }
+
+        // extract methods into impl block
+        let impl_block = Impl {
+            span: struct_def.span.clone(),
+            file: struct_def.file.clone(),
+            type_name: struct_def.name.clone(),
+            type_params: struct_def.type_params.clone(),
+            methods: struct_def.methods.clone(),
+            trait_: None,
+            where_constraints: vec![],
+        };
+
+        let clean_struct = Struct {
+            span: struct_def.span,
+            file: struct_def.file,
+            name: struct_def.name,
+            type_params: struct_def.type_params,
+            fields: struct_def.fields,
+            methods: vec![], // all extracted into sep impls
+            vis: struct_def.vis,
+        };
+
+        let impl_node = ASTNode {
+            span: node.span.clone(),
+            file: node.file.clone(),
+            node: ASTNodeKind::Impl(impl_block),
+            attributes: vec![],
+        };
+
+        (clean_struct, Some(impl_node))
+    }
+
+    fn desugar_enum(&mut self, enum_def: Enum, node: &ASTNode) -> (Enum, Option<ASTNode>) {
+        if enum_def.methods.is_empty() {
+            return (enum_def, None);
+        }
+
+        // check for duplicate method names
+        let mut seen_methods: HashMap<String, Range<usize>> = HashMap::new();
+        for method in &enum_def.methods {
+            if let Some(existing) = seen_methods.get(&method.name) {
+                self.diagnostics.add_error(ValidationError {
+                    span: method.span.clone(),
+                    file: method.file.clone(),
+                    kind: ValidationErrorKind::DuplicateDefinition {
+                        name: method.name.clone(),
+                        first_defined: existing.clone(),
+                    },
+                });
+            } else {
+                seen_methods.insert(method.name.clone(), method.span.clone());
+            }
+        }
+
+        // extract methods into impl block
+        let impl_block = Impl {
+            span: enum_def.span.clone(),
+            file: enum_def.file.clone(),
+            type_name: enum_def.name.clone(),
+            type_params: enum_def.type_params.clone(),
+            methods: enum_def.methods.clone(),
+            trait_: None,
+            where_constraints: vec![],
+        };
+
+        let clean_enum = Enum {
+            span: enum_def.span,
+            file: enum_def.file,
+            name: enum_def.name,
+            type_params: enum_def.type_params,
+            variants: enum_def.variants,
+            methods: vec![],
+            vis: enum_def.vis,
+        };
+
+        let impl_node = ASTNode {
+            span: node.span.clone(),
+            file: node.file.clone(),
+            node: ASTNodeKind::Impl(impl_block),
+            attributes: vec![],
+        };
+
+        (clean_enum, Some(impl_node))
+    }
+
+    fn collect_macros(&mut self, nodes: &[ASTNode]) {
+        for node in nodes {
+            if let ASTNodeKind::MacroDef(macro_def) = &node.node {
+                if let Some(existing) = self.macros.get(&macro_def.name) {
+                    self.diagnostics.add_error(ValidationError {
+                        span: macro_def.span.clone(),
+                        file: macro_def.file.clone(),
+                        kind: ValidationErrorKind::DuplicateDefinition {
+                            name: macro_def.name.clone(),
+                            first_defined: existing.span.clone(),
+                        },
+                    });
+                } else {
+                    self.macros
+                        .insert(macro_def.name.clone(), macro_def.clone());
+                }
+            }
+        }
+    }
+
+    fn expand_macros(&mut self, nodes: Vec<ASTNode>) -> Vec<ASTNode> {
+        nodes
+            .into_iter()
+            .flat_map(|node| self.expand_node(node))
+            .collect()
+    }
+
+    fn expand_node(&mut self, node: ASTNode) -> Vec<ASTNode> {
+        match node.node {
+            ASTNodeKind::Expr(expr) => {
+                let expanded = self.expand_expr(expr);
+                vec![ASTNode {
+                    span: node.span,
+                    file: node.file,
+                    node: ASTNodeKind::Expr(expanded),
+                    attributes: node.attributes,
+                }]
+            }
+            ASTNodeKind::MacroDef(_) => {
+                // idk what to do with it
+                vec![]
+            }
+            _ => vec![node],
+        }
+    }
+
+    fn expand_expr(&mut self, expr: Expr) -> Expr {
+        match expr.expr {
+            ExprKind::MacroCall(name, _args, _delimiter) => {
+                if let Some(_macro_def) = self.macros.get(&name) {
+                    // TODO: Actual macro expansion
+                    self.diagnostics.add_error(ValidationError {
+                        span: expr.span.clone(),
+                        file: expr.file.clone(),
+                        kind: ValidationErrorKind::MacroExpansionFailed {
+                            name: name.clone(),
+                            reason: "Macro expansion not yet implemented".to_string(),
+                        },
+                    });
+                    Expr {
+                        span: expr.span,
+                        file: expr.file,
+                        expr: ExprKind::Error,
+                    }
+                } else {
+                    self.diagnostics.add_error(ValidationError {
+                        span: expr.span.clone(),
+                        file: expr.file.clone(),
+                        kind: ValidationErrorKind::MacroNotFound { name },
+                    });
+                    Expr {
+                        span: expr.span,
+                        file: expr.file,
+                        expr: ExprKind::Error,
+                    }
+                }
+            }
+
+            ExprKind::Block(exprs) => {
+                let expanded: Vec<_> = exprs.into_iter().map(|e| self.expand_expr(e)).collect();
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::Block(expanded),
+                }
+            }
+
+            ExprKind::IfElse {
+                condition,
+                then,
+                else_,
+            } => Expr {
+                span: expr.span,
+                file: expr.file,
+                expr: ExprKind::IfElse {
+                    condition: Box::new(self.expand_expr(*condition)),
+                    then: Box::new(self.expand_expr(*then)),
+                    else_: else_.map(|e| Box::new(self.expand_expr(*e))),
+                },
+            },
+
+            // TODO: expand other expression types
+            _ => expr,
+        }
+    }
+
+    fn validate_nodes(&mut self, nodes: Vec<ASTNode>) -> Vec<ASTNode> {
+        // First pass: collect all top-level names
+        self.collect_top_level_names(&nodes);
+
+        // Second pass: validate each node
+        nodes
+            .into_iter()
+            .map(|node| self.validate_node(node))
+            .collect()
+    }
+
+    fn validate_node(&mut self, node: ASTNode) -> ASTNode {
+        self.current_file = node.file.clone();
+
+        match node.node {
+            ASTNodeKind::Expr(expr) => {
+                let validated = self.validate_expr(expr);
+                ASTNode {
+                    span: node.span,
+                    file: node.file,
+                    node: ASTNodeKind::Expr(validated),
+                    attributes: node.attributes,
+                }
+            }
+
+            ASTNodeKind::Function(func) => {
+                let validated = self.validate_function(*func);
+                ASTNode {
+                    span: node.span,
+                    file: node.file,
+                    node: ASTNodeKind::Function(Box::new(validated)),
+                    attributes: node.attributes,
+                }
+            }
+
+            ASTNodeKind::Struct(s) => {
+                let validated = self.validate_struct(s);
+                ASTNode {
+                    span: node.span,
+                    file: node.file,
+                    node: ASTNodeKind::Struct(validated),
+                    attributes: node.attributes,
+                }
+            }
+
+            ASTNodeKind::Enum(e) => {
+                let validated = self.validate_enum(e);
+                ASTNode {
+                    span: node.span,
+                    file: node.file,
+                    node: ASTNodeKind::Enum(validated),
+                    attributes: node.attributes,
+                }
+            }
+
+            _ => node,
+        }
+    }
+
+    fn validate_expr(&mut self, expr: Expr) -> Expr {
+        match expr.expr {
+            ExprKind::Break(val) => {
+                if !self.in_loop {
+                    self.diagnostics.add_error(ValidationError {
+                        span: expr.span.clone(),
+                        file: expr.file.clone(),
+                        kind: ValidationErrorKind::BreakOutsideLoop,
+                    });
+                }
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::Break(val.map(|v| Box::new(self.validate_expr(*v)))),
+                }
+            }
+
+            ExprKind::Continue => {
+                if !self.in_loop {
+                    self.diagnostics.add_error(ValidationError {
+                        span: expr.span.clone(),
+                        file: expr.file.clone(),
+                        kind: ValidationErrorKind::ContinueOutsideLoop,
+                    });
+                }
+                expr
+            }
+
+            ExprKind::Return(val) => {
+                // ~return is only valid inside user-defined functions, not in auto-generated main~
+                // if !self.in_user_function {
+                //     self.diagnostics.add_error(ValidationError {
+                //         span: expr.span.clone(),
+                //         file: expr.file.clone(),
+                //         kind: ValidationErrorKind::ReturnOutsideFunction,
+                //     });
+                // }
+                // top level return acts like exit() function with the val as the exit code.
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::Return(val.map(|v| Box::new(self.validate_expr(*v)))),
+                }
+            }
+
+            ExprKind::Loop { label, body } => {
+                let was_in_loop = self.in_loop;
+                self.in_loop = true;
+                let validated_body = self.validate_expr(*body);
+                self.in_loop = was_in_loop;
+
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::Loop {
+                        label,
+                        body: Box::new(validated_body),
+                    },
+                }
+            }
+
+            ExprKind::While(cond, body) => {
+                let was_in_loop = self.in_loop;
+                self.in_loop = true;
+                let validated_cond = self.validate_expr(*cond);
+                let validated_body = self.validate_expr(*body);
+                self.in_loop = was_in_loop;
+
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::While(Box::new(validated_cond), Box::new(validated_body)),
+                }
+            }
+
+            ExprKind::For {
+                iterator,
+                value,
+                expression,
+            } => {
+                let was_in_loop = self.in_loop;
+                self.in_loop = true;
+                let validated_iter = self.validate_expr(*iterator);
+                let validated_body = self.validate_expr(*expression);
+                self.in_loop = was_in_loop;
+
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::For {
+                        iterator: Box::new(validated_iter),
+                        value,
+                        expression: Box::new(validated_body),
+                    },
+                }
+            }
+
+            ExprKind::Import(import) => {
+                // import validation is handled by ModuleResolver, so nothing to do here FOR NOW
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::Import(import),
+                }
+            }
+
+            ExprKind::Block(exprs) => {
+                let validated_exprs: Vec<_> =
+                    exprs.into_iter().map(|e| self.validate_expr(e)).collect();
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::Block(validated_exprs),
+                }
+            }
+
+            // TODO: other variants
+            _ => expr,
+        }
+    }
+
+    fn validate_function(&mut self, func: Function) -> Function {
+        // uniqueness check already done in collect_top_level_names
+
+        let was_in_function = self.in_function;
+        let was_in_user_function = self.in_user_function;
+
+        self.in_function = true;
+        self.in_user_function = func.name != "main" && func.name != "__mangled_main__";
+
+        let validated_body = func.body.map(|b| self.validate_expr(b));
+
+        self.in_function = was_in_function;
+        self.in_user_function = was_in_user_function;
+
+        Function {
+            span: func.span,
+            file: func.file,
+            vis: func.vis,
+            name: func.name,
+            type_params: func.type_params,
+            args: func.args,
+            return_type: func.return_type,
+            where_constraints: func.where_constraints,
+            effects: func.effects,
+            body: validated_body,
+        }
+    }
+
+    fn validate_struct(&mut self, struct_def: Struct) -> Struct {
+        let mut seen_fields = HashMap::new();
+
+        for (field, _vis) in &struct_def.fields {
+            if let Some(_existing) = seen_fields.get(&field.name) {
+                self.diagnostics.add_error(ValidationError {
+                    span: field.span.clone(),
+                    file: field.file.clone(),
+                    kind: ValidationErrorKind::DuplicateField {
+                        field: field.name.clone(),
+                    },
+                });
+            } else {
+                seen_fields.insert(field.name.clone(), field.span.clone());
+            }
+        }
+
+        struct_def
+    }
+
+    fn validate_enum(&mut self, enum_def: Enum) -> Enum {
+        let mut seen_variants = HashMap::new();
+
+        for variant in &enum_def.variants {
+            if let Some(_existing) = seen_variants.get(&variant.name) {
+                self.diagnostics.add_error(ValidationError {
+                    span: variant.span.clone(),
+                    file: variant.file.clone(),
+                    kind: ValidationErrorKind::DuplicateVariant {
+                        variant: variant.name.clone(),
+                    },
+                });
+            } else {
+                seen_variants.insert(variant.name.clone(), variant.span.clone());
+            }
+        }
+
+        enum_def
+    }
+
+    // fn validate_impl(&mut self, impl_block: Impl) -> Impl {
+    //     // Check for duplicate methods in impl
+    //     let mut seen_methods: HashMap<String, Range<usize>> = HashMap::new();
+
+    //     for method in &impl_block.methods {
+    //         let key = format!("{}::{}", impl_block.type_name, method.name);
+
+    //         if let Some(existing) = seen_methods.get(&key) {
+    //             self.diagnostics.add_error(ValidationError {
+    //                 span: method.span.clone(),
+    //                 file: method.file.clone(),
+    //                 kind: ValidationErrorKind::DuplicateDefinition {
+    //                     name: method.name.clone(),
+    //                     first_defined: existing.clone(),
+    //                 },
+    //             });
+    //         } else {
+    //             seen_methods.insert(key, method.span.clone());
+    //         }
+    //     }
+
+    //     impl_block
+    // }
+
+    fn collect_top_level_names(&mut self, nodes: &[ASTNode]) {
+        for node in nodes {
+            match &node.node {
+                ASTNodeKind::Function(func) => {
+                    if let Some(existing) = self.defined_items.get(&func.name) {
+                        self.diagnostics.add_error(ValidationError {
+                            span: func.span.clone(),
+                            file: func.file.clone(),
+                            kind: ValidationErrorKind::DuplicateDefinition {
+                                name: func.name.clone(),
+                                first_defined: existing.clone(),
+                            },
+                        });
+                    } else {
+                        self.defined_items
+                            .insert(func.name.clone(), func.span.clone());
+                    }
+                }
+
+                ASTNodeKind::Struct(s) => {
+                    if let Some(existing) = self.defined_items.get(&s.name) {
+                        self.diagnostics.add_error(ValidationError {
+                            span: s.span.clone(),
+                            file: s.file.clone(),
+                            kind: ValidationErrorKind::DuplicateDefinition {
+                                name: s.name.clone(),
+                                first_defined: existing.clone(),
+                            },
+                        });
+                    } else {
+                        self.defined_items.insert(s.name.clone(), s.span.clone());
+                    }
+                }
+
+                ASTNodeKind::Enum(e) => {
+                    if let Some(existing) = self.defined_items.get(&e.name) {
+                        self.diagnostics.add_error(ValidationError {
+                            span: e.span.clone(),
+                            file: e.file.clone(),
+                            kind: ValidationErrorKind::DuplicateDefinition {
+                                name: e.name.clone(),
+                                first_defined: existing.clone(),
+                            },
+                        });
+                    } else {
+                        self.defined_items.insert(e.name.clone(), e.span.clone());
+                    }
+                }
+
+                ASTNodeKind::TypeAlias(ta) => {
+                    if let Some(existing) = self.defined_items.get(&ta.name) {
+                        self.diagnostics.add_error(ValidationError {
+                            span: ta.span.clone(),
+                            file: ta.file.clone(),
+                            kind: ValidationErrorKind::DuplicateDefinition {
+                                name: ta.name.clone(),
+                                first_defined: existing.clone(),
+                            },
+                        });
+                    } else {
+                        self.defined_items.insert(ta.name.clone(), ta.span.clone());
+                    }
+                }
+
+                ASTNodeKind::Trait(t) => {
+                    if let Some(existing) = self.defined_items.get(&t.name) {
+                        self.diagnostics.add_error(ValidationError {
+                            span: t.span.clone(),
+                            file: "".to_string(),
+                            kind: ValidationErrorKind::DuplicateDefinition {
+                                name: t.name.clone(),
+                                first_defined: existing.clone(),
+                            },
+                        });
+                    } else {
+                        self.defined_items.insert(t.name.clone(), t.span.clone());
+                    }
+                }
+
+                ASTNodeKind::EffectDef(eff) => {
+                    if let Some(existing) = self.defined_items.get(&eff.name) {
+                        self.diagnostics.add_error(ValidationError {
+                            span: eff.span.clone(),
+                            file: eff.file.clone(),
+                            kind: ValidationErrorKind::DuplicateDefinition {
+                                name: eff.name.clone(),
+                                first_defined: existing.clone(),
+                            },
+                        });
+                    } else {
+                        self.defined_items
+                            .insert(eff.name.clone(), eff.span.clone());
+                    }
+                }
+
+                ASTNodeKind::Impl(_) => {}
+
+                _ => {}
+            }
+        }
+    }
+}

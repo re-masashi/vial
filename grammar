@@ -1,0 +1,102 @@
+// ? at the end implies "optional"
+// * implies 0 or more
+// + implies 1 or more
+// | implies "or"
+// kindof like regex
+
+ASTNodeKind := 
+    Expr
+    | Function
+    | Struct
+    | Enum
+    | Impl_block
+    | Type_alias
+    | Macro_def
+    | Trait_def
+    | Effect_def
+
+
+Expr := 
+	Int = Token::Int
+	| Float = Token::Float
+	| Bool = Token::Bool
+	| String = Token::String
+	| Variable = Token::Variable
+	| BinOp = Expr BinOp Expr
+	| UnOp = UnOp Expr // special case is unwrap. instead of going in FRONT it goes behind. so its Expr UnOp syntactically
+	| Let = Token::KeywordLet name: Token::Variable type_annot: (Token::Colon TypeAnnot)? Token::Assign value: Expr
+	| Array = Token::LBracket (Expr Token::Comma)* Token::LBracket
+	| Tuple = Expr Token::Comma Expr*
+	| Token::LParen Expr Token::RParen
+	| Block = Token::LBrace (Expr Token::Semicolon?)+ Token::RBrace
+	| Map = Token::LBrace (Expr Token::Colon Expr Token::Comma)+ Token::RBrace
+	| EnumConstruct = Token::Variable Token::Access Token::Variable Token::LParen (Expr Token::Comma)* Token::RParen
+	| Perform = Token::Perform effect: Token::Variable args: (Token::LParen (Expr Token::Comma)* Token::RParen)
+	| Handle = Token::Handle body: Expr Token::With Token::LBrace handlers: EffectHandler+ Token::RBrace
+	| Lambda = Token::Fn Token::LParen args: (Token::Variable (Token::Colon TypeAnnot)? Token::Comma)* Token::RParen expression: Expr
+	| Cast = expr: Expr Token::KeywordAs target_type: TypeAnnot
+	| IfElse = Token::KeywordIf condition: Expr then: Expr (Token::KeywordElse else_: Expr)?
+	| With = Token::KeywordWith context: Expr Token::KeywordAs var: Token::Variable body: Expr
+	// ill add `loop` later
+	| Match = Token::KeywordMatch Expr Token::LBrace MatchArm* Token::RBrace
+	| For = Token::KeywordFor value: Token::Variable Token::KeywordIn iterator: Expr expression: Expr
+	| While = Token::KeywordWhile Expr Expr
+	| IfLet = Token::KeywordIf Token::KeywordLet pattern: Pattern Token::Assign expr: Expr then: Expr (Token::KeywordElse else: Expr)?
+	| WhileLet = Token::KeywordWhile Token::KeywordLet pattern: Pattern Token::Assign expr: Expr body: Expr
+	| Return = Token::KeywordReturn Expr?
+	| Break = Token::KeywordBreak Expr?
+	| Continue = Token::KeywordContinue
+	| Call = Expr Token::LParen (Expr Token::Comma)* Token::RParen
+	| Index = Expr Token::LBracket Expr Token::RBracket
+	| FieldAccess = Expr Token::Dot Token::Variable
+	| OptionalChain = Expr Token::OptionalChain Token::Variable
+	| MacroCall = Token::MacroInvocation MacroDelimiterStart (Expr Token::Comma)* MacroDelimiterEnd
+	| Import = Token::Import path: Token::String Token::RBrace items: (Token::Variable (Token::KeywordAs Token::Variable)?)* Token::KeywordAs Token::Variable
+	| Error // just placeholder if needed
+
+Function := 
+	| Token::KeywordDef vis: Token::KeywordPub? name: Token::Variable type_params: (Token::Less TypeParam+ Token::Greater)? args: Token::LParen (Token::Variable (Token::Colon TypeAnnot)? Token::Comma)* Token::RParen (Token::Arrow return_type: TypeAnnot)? (Token::Where where_constrains: TypeConstraint*)? (Token::Effects effects: EffectAnnot*)? Expr 
+
+Struct := 
+	| Token::KeywordStruct vis: Token::KeywordPub? name: Token::Variable type_params: (Token::Less TypeParam+ Token::Greater)? Token::LBrace fields|methods: ((Token::Variable Token::KeywordPub? Token::Colon TypeAnnot)|Function)* Token::RBrace 
+
+Enum := 
+	| Token::KeywordEnum vis: Token::KeywordPub? name: Token::Variable type_params: (Token::Less TypeParam+ Token::Greater)? fields|methods: (EnumVariant|Function)* Token::RBrace 
+
+TypeAlias = 
+	| Token::KeywordType name: Token::Variable type_params: (Token::Less TypeParam+ Token::Greater)? Token::KeywordWhere where_constrains: TypeConstraint* Token::Assign target_type: TypeAnnot
+
+Impl = 
+	| Token::KeywordImpl name: Token::Variable (Token::Colon trait_: Token::Variable)? type_params: (Token::Less TypeParam+ Token::Greater)? Token::KeywordWhere where_constrains: TypeConstraint* Token::LBrace methods: Function* Token::RBrace
+
+Trait = 
+	| Token::KeywordTrait name: Token::Variable (Token::Colon trait_: Token::Variable)? associated_types|methods: (Token::KeywordType TypeAnnot|Function)*
+	// todo: add supertraits support. Show: Debug + Clone
+
+// todo: MacroDef 
+
+EffectDef = 
+	| Token::KeywordEffect vis: Token::KeywordPub? name: Token::Variable type_params: (Token::Less TypeParam+ Token::Greater)? where_constrains: TypeConstraint* Token::LBrace EffectOperation* Token::RBrace
+
+EffectAnnot =
+	| Token::Variable
+
+EffectHandler = 
+	| Token::LParen args: Token::Variable* Token::RParen
+
+TypeAnnot = 
+	| Token::KeywordBool
+	| Token::KeywordInt
+	| Token::KeywordFloat
+	| Token::KeywordString
+	| Named = Token::Variable
+	| Unit = Token::LParen Token::RParen
+	| Never = Token::Bang
+	| Generic = idk
+	| Token::Fn Token::LParen args: (TypeAnnot Token::Comma)* Token::RParen Token::Effects EffectAnnot*
+	| Tuple = Token::LParen TypeAnnot+ Token::RParen
+	| Union = TypeAnnot | (Token::Union TypeAnnot) +
+	| Trait = Token::KeywordTrait Token::Variable+
+	| Constructor = idk
+	| Forall = Token::KeywordForall idk
+	| idk the rest
