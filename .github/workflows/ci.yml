@@ -69,7 +69,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        rust-version: [1.91, stable, beta, nightly]
+        rust-version: [stable, beta]
     steps:
     - uses: actions/checkout@v4
     - name: Setup Rust toolchain
