@@ -16,3 +16,5 @@ def mutliple_expressions_in_a_block() {
 	print(hi("milli"))
 	print(hi("bob"))
 }
+
+1.to_float()

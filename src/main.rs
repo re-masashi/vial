@@ -2,6 +2,7 @@ use ariadne::{Color, Label, Report, ReportKind, Source};
 use chumsky::prelude::*;
 use logos::Logos;
 use vial::ast::Interner;
+use vial::desugar::lambda::LambdaDesugarer;
 use vial::lexer::Token;
 use vial::parser;
 use vial::typechecker::TypeChecker;
@@ -159,9 +160,14 @@ fn main() {
         std::process::exit(1);
     }
 
+    // Only proceed with further processing and validation if type checking was successful
+    println!("Lambda Desugaring");
+    let mut desugarer = LambdaDesugarer::new(type_checker.interner.clone());
+    let desugared_ast = desugarer.desugar_program(typed_ast);
+
     println!("Monomorphizer");
     let mut monomorphizer = Monomorphizer::new(type_checker.interner);
-    let monomorphized_ast = monomorphizer.monomorphize_program(typed_ast);
+    let monomorphized_ast = monomorphizer.monomorphize_program(desugared_ast);
 
     // println!("Nodes: {:#?}", monomorphized_ast);
 

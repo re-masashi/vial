@@ -1247,6 +1247,23 @@ fn test_pure_function_calling_effectful_function() {
 
     let _typed = tc.check_program(program);
     // Should have effect mismatch error
+    assert!(
+        tc.diagnostics.has_errors(),
+        "Expected effect mismatch error but got none"
+    );
+
+    // Check that there's an EffectMismatch error
+    let effect_mismatch_errors: Vec<&TypeError> = tc
+        .diagnostics
+        .type_errors
+        .iter()
+        .filter(|e| matches!(e.kind, TypeErrorKind::EffectMismatch { .. }))
+        .collect();
+
+    assert!(
+        !effect_mismatch_errors.is_empty(),
+        "Expected EffectMismatch error"
+    );
 }
 
 #[test]

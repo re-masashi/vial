@@ -135,6 +135,43 @@ impl EffectSet {
             rest: None,
         }
     }
+
+    // Union two effect sets
+    pub fn union(mut self, other: &EffectSet) -> Self {
+        // Add effects from other that aren't already in self
+        for effect in &other.effects {
+            if !self.effects.contains(effect) {
+                self.effects.push(*effect);
+            }
+        }
+
+        // For open effect sets, we need to handle the rest variable appropriately
+        // For now, if either set has a rest, we return the more general one
+        if self.rest.is_none() {
+            self.rest = other.rest;
+        }
+
+        self
+    }
+
+    // Check if this effect set is a subset of another (i.e., can be handled by other)
+    pub fn is_subset_of(&self, other: &EffectSet) -> bool {
+        // Every effect in self must be in other
+        for effect in &self.effects {
+            if !other.effects.contains(effect) {
+                // If other has a rest variable, it can handle unknown effects
+                if other.rest.is_none() {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    // Check if this effect set is empty (pure)
+    pub fn is_pure(&self) -> bool {
+        self.effects.is_empty()
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
@@ -527,6 +564,7 @@ pub struct TypeChecker {
     pub constraints: Vec<Constraint>,
     pub trait_resolver: TraitResolver,
     pub constraint_solver: ConstraintSolver,
+    current_function_effects: EffectSet, // Track effects allowed in current context
 }
 
 #[derive(Debug, Default, Clone)]
@@ -669,6 +707,7 @@ impl TypeChecker {
             constraints: Vec::new(),
             trait_resolver: trait_resolver.clone(),
             constraint_solver: ConstraintSolver::new(trait_resolver),
+            current_function_effects: EffectSet::pure(),
         }
     }
 
@@ -1348,7 +1387,7 @@ impl TypeChecker {
                     TypeKind::Function {
                         params,
                         return_type,
-                        ..
+                        effects,
                     } => {
                         if params.len() != args_typed.len() {
                             self.diagnostics.add_type_error(TypeError {
@@ -1373,6 +1412,18 @@ impl TypeChecker {
                         for (param_type, arg) in params.iter().zip(&args_typed) {
                             println!("unifying args");
                             self.unify(param_type, &arg.type_, &arg.span);
+                        }
+
+                        // Check if the effects of the called function are allowed by the current context
+                        if !effects.is_subset_of(&self.current_function_effects) {
+                            self.diagnostics.add_type_error(TypeError {
+                                span: expr.span.clone(),
+                                file: expr.file.clone(),
+                                kind: TypeErrorKind::EffectMismatch {
+                                    required: effects.clone(),
+                                    found: self.current_function_effects.clone(),
+                                },
+                            });
                         }
 
                         let concrete_return = self.substitution.apply(return_type);
@@ -2262,11 +2313,32 @@ impl TypeChecker {
             }
 
             ExprKind::Handle { body, handlers } => {
+                // Save the current allowed effects
+                let saved_effects = self.current_function_effects.clone();
+
+                // When handling effects, we remove the handled effects from the allowed set
+                // This simulates that these effects are now being handled and don't need to be declared
+                let mut handled_effects = Vec::new();
+                for handler in handlers {
+                    let effect_sym = self.interner.intern(&handler.effect);
+                    handled_effects.push(effect_sym.0);
+                }
+
+                // Remove handled effects from current_function_effects
+                let mut new_effects = saved_effects.clone();
+                new_effects.effects.retain(|e| !handled_effects.contains(e));
+
+                // Update the current allowed effects to exclude handled ones
+                self.current_function_effects = new_effects;
+
                 let body_typed = self.check_expr(body);
                 let typed_handlers: Vec<_> = handlers
                     .iter()
                     .map(|h| self.check_effect_handler(h))
                     .collect();
+
+                // Restore the original effects
+                self.current_function_effects = saved_effects;
 
                 TypedExpr {
                     span: expr.span.clone(),
@@ -2956,8 +3028,14 @@ impl TypeChecker {
             })
             .collect();
 
+        // Set the current function's allowed effects for checking the body
+        let saved_effects = self.current_function_effects.clone();
+        self.current_function_effects = self.convert_effect_annot(&func.effects);
+
         let body = func.body.map(|b| self.check_expr(&b));
 
+        // Restore the previous function's effects
+        self.current_function_effects = saved_effects;
         self.env.pop_scope();
 
         // Now unify the return type with the body type (this happens inside the function type)
