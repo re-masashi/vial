@@ -64,7 +64,9 @@ fn main() {
         for error in &errors {
             let token_span = error.span();
 
-            let byte_span = if token_span.end <= token_spans.len() {
+            let byte_span = if token_span.start < token_spans.len()
+                && (token_span.end == 0 || token_span.end <= token_spans.len())
+            {
                 let start = token_spans[token_span.start].start;
                 let end = if token_span.end > 0 && token_span.end <= token_spans.len() {
                     token_spans[token_span.end - 1].end

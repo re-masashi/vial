@@ -1532,6 +1532,67 @@ fn test_while_let_with_tuple_pattern() {
 }
 
 #[test]
+fn test_struct_construct() {
+    let expr = parse_expr("Point { x: 1, y: 2 }");
+    match &expr.expr {
+        ExprKind::StructConstruct { name, fields } => {
+            assert_eq!(name, "Point");
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].0, "x");
+            assert!(matches!(fields[0].1.expr, ExprKind::Int(1)));
+            assert_eq!(fields[1].0, "y");
+            assert!(matches!(fields[1].1.expr, ExprKind::Int(2)));
+        }
+        _ => panic!("Expected struct construction"),
+    }
+
+    // Test struct with string fields
+    let expr = parse_expr("Person { name: \"Alice\", age: 30 }");
+    match &expr.expr {
+        ExprKind::StructConstruct { name, fields } => {
+            assert_eq!(name, "Person");
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].0, "name");
+            match &fields[0].1.expr {
+                ExprKind::String(s) => assert_eq!(s, "Alice"),
+                _ => panic!("Expected string literal"),
+            }
+            assert_eq!(fields[1].0, "age");
+            assert!(matches!(fields[1].1.expr, ExprKind::Int(30)));
+        }
+        _ => panic!("Expected struct construction"),
+    }
+
+    // Test empty struct
+    let expr = parse_expr("Empty {}");
+    match &expr.expr {
+        ExprKind::StructConstruct { name, fields } => {
+            assert_eq!(name, "Empty");
+            assert_eq!(fields.len(), 0);
+        }
+        _ => panic!("Expected struct construction"),
+    }
+
+    // Test struct with nested expressions
+    let expr = parse_expr("Point { x: a + b, y: c * d }");
+    match &expr.expr {
+        ExprKind::StructConstruct { name, fields } => {
+            assert_eq!(name, "Point");
+            assert_eq!(fields.len(), 2);
+            match &fields[0].1.expr {
+                ExprKind::BinOp(_, BinOp::Add, _) => {}
+                _ => panic!("Expected addition expression for x field"),
+            }
+            match &fields[1].1.expr {
+                ExprKind::BinOp(_, BinOp::Mul, _) => {}
+                _ => panic!("Expected multiplication expression for y field"),
+            }
+        }
+        _ => panic!("Expected struct construction"),
+    }
+}
+
+#[test]
 fn test_nested_expressions() {
     // Test deeply nested block expressions
     let expr = parse_expr("{ { { 42 } } }");
@@ -1601,5 +1662,146 @@ fn test_nested_expressions() {
             }
         }
         _ => panic!("Expected if-else expression"),
+    }
+}
+
+#[test]
+fn test_struct_construct_edge_cases() {
+    // Test struct with single field
+    let expr = parse_expr("Single { value: 42 }");
+    match &expr.expr {
+        ExprKind::StructConstruct { name, fields } => {
+            assert_eq!(name, "Single");
+            assert_eq!(fields.len(), 1);
+            assert_eq!(fields[0].0, "value");
+            assert!(matches!(fields[0].1.expr, ExprKind::Int(42)));
+        }
+        _ => panic!("Expected struct construction"),
+    }
+
+    // Test struct with many fields
+    let expr = parse_expr("Many { a: 1, b: 2, c: 3, d: 4, e: 5 }");
+    match &expr.expr {
+        ExprKind::StructConstruct { name, fields } => {
+            assert_eq!(name, "Many");
+            assert_eq!(fields.len(), 5);
+            for (i, (field_name, field_expr)) in fields.iter().enumerate() {
+                let expected_name = (b'a' + i as u8) as char;
+                assert_eq!(field_name, &expected_name.to_string());
+                match &field_expr.expr {
+                    ExprKind::Int(val) => assert_eq!(*val, (i + 1) as i64),
+                    _ => panic!("Expected integer"),
+                }
+            }
+        }
+        _ => panic!("Expected struct construction"),
+    }
+
+    // Test struct with complex field expressions
+    let expr = parse_expr("Complex { sum: 1 + 2, cond: if true { 5 } else { 6 } }");
+    match &expr.expr {
+        ExprKind::StructConstruct { name, fields } => {
+            assert_eq!(name, "Complex");
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].0, "sum");
+            assert!(matches!(
+                fields[0].1.expr,
+                ExprKind::BinOp(_, BinOp::Add, _)
+            ));
+            assert_eq!(fields[1].0, "cond");
+            assert!(matches!(fields[1].1.expr, ExprKind::IfElse { .. }));
+        }
+        _ => panic!("Expected struct construction"),
+    }
+
+    // Test struct with trailing comma (should work)
+    let expr = parse_expr("Trailing { x: 1, y: 2, }");
+    match &expr.expr {
+        ExprKind::StructConstruct { name, fields } => {
+            assert_eq!(name, "Trailing");
+            assert_eq!(fields.len(), 2);
+        }
+        _ => panic!("Expected struct construction"),
+    }
+}
+
+#[test]
+fn test_struct_pattern_parsing() {
+    // Test struct pattern with explicit bindings
+    let expr = parse_expr("match p { Point { x: a, y: b } => a + b }");
+    match &expr.expr {
+        ExprKind::Match(_, arms) => {
+            assert_eq!(arms.len(), 1);
+            match &arms[0].pattern.pat {
+                PatKind::Struct { name, fields } => {
+                    assert_eq!(name, "Point");
+                    assert_eq!(fields.len(), 2);
+                    assert_eq!(fields[0].0, "x");
+                    match &fields[0].1.pat {
+                        PatKind::Bind(bind_name) => assert_eq!(bind_name, "a"),
+                        _ => panic!("Expected bind pattern"),
+                    }
+                    assert_eq!(fields[1].0, "y");
+                    match &fields[1].1.pat {
+                        PatKind::Bind(bind_name) => assert_eq!(bind_name, "b"),
+                        _ => panic!("Expected bind pattern"),
+                    }
+                }
+                _ => panic!("Expected struct pattern"),
+            }
+        }
+        _ => panic!("Expected match expression"),
+    }
+
+    // Test struct pattern with shorthand bindings
+    let expr = parse_expr("match p { Point { x, y } => x + y }");
+    match &expr.expr {
+        ExprKind::Match(_, arms) => {
+            assert_eq!(arms.len(), 1);
+            match &arms[0].pattern.pat {
+                PatKind::Struct { name, fields } => {
+                    assert_eq!(name, "Point");
+                    assert_eq!(fields.len(), 2);
+                    assert_eq!(fields[0].0, "x");
+                    match &fields[0].1.pat {
+                        PatKind::Bind(bind_name) => assert_eq!(bind_name, "x"), // Should bind to same name
+                        _ => panic!("Expected bind pattern"),
+                    }
+                    assert_eq!(fields[1].0, "y");
+                    match &fields[1].1.pat {
+                        PatKind::Bind(bind_name) => assert_eq!(bind_name, "y"), // Should bind to same name
+                        _ => panic!("Expected bind pattern"),
+                    }
+                }
+                _ => panic!("Expected struct pattern"),
+            }
+        }
+        _ => panic!("Expected match expression"),
+    }
+
+    // Test mixed struct pattern (some explicit, some shorthand)
+    let expr = parse_expr("match p { Point { x: val, y } => val + y }");
+    match &expr.expr {
+        ExprKind::Match(_, arms) => {
+            assert_eq!(arms.len(), 1);
+            match &arms[0].pattern.pat {
+                PatKind::Struct { name, fields } => {
+                    assert_eq!(name, "Point");
+                    assert_eq!(fields.len(), 2);
+                    assert_eq!(fields[0].0, "x");
+                    match &fields[0].1.pat {
+                        PatKind::Bind(bind_name) => assert_eq!(bind_name, "val"),
+                        _ => panic!("Expected bind pattern"),
+                    }
+                    assert_eq!(fields[1].0, "y");
+                    match &fields[1].1.pat {
+                        PatKind::Bind(bind_name) => assert_eq!(bind_name, "y"),
+                        _ => panic!("Expected bind pattern"),
+                    }
+                }
+                _ => panic!("Expected struct pattern"),
+            }
+        }
+        _ => panic!("Expected match expression"),
     }
 }

@@ -97,6 +97,10 @@ pub enum TypeAnnotKind {
     //     constraints: Vec<ConstraintAnnot>,
     //     body: Box<TypeAnnot>,
     // },
+
+    // Pointer type for FFI
+    Pointer(Box<TypeAnnot>),
+
     Error,
 }
 
@@ -183,6 +187,10 @@ pub enum ExprKind {
         name: String,
         variant: String,
         args: Vec<Expr>,
+    },
+    StructConstruct {
+        name: String,
+        fields: Vec<(String, Expr)>,
     },
 
     Perform {
@@ -814,6 +822,11 @@ pub enum TypedExprKind {
         variant: Symbol,
         variant_id: VariantId,
         args: Vec<TypedExpr>,
+    },
+    StructConstruct {
+        struct_name: Symbol,
+        struct_id: StructId,
+        fields: Vec<(Symbol, FieldId, TypedExpr)>,
     },
 
     Perform {

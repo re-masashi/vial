@@ -111,13 +111,42 @@ fn type_annot<'src>()
             })
             .labelled("function type");
 
-        let base = choice((function, tuple, generic, primitive, unit, never, named)).map_with(
-            |kind, e| TypeAnnot {
-                span: to_range(e.span()),
-                file: String::new(),
-                type_: kind,
-            },
-        );
+        let base_no_pointer = choice((
+            function.clone(),
+            tuple.clone(),
+            generic.clone(),
+            primitive.clone(),
+            unit.clone(),
+            never.clone(),
+            named.clone(),
+        ))
+        .map_with(|kind, e| TypeAnnot {
+            span: to_range(e.span()),
+            file: String::new(),
+            type_: kind,
+        });
+
+        // Handle pointer types as a prefix operator on types
+        let pointer = just(Token::Mul)
+            .ignore_then(base_no_pointer.clone())
+            .map(|inner| TypeAnnotKind::Pointer(Box::new(inner)))
+            .labelled("pointer type");
+
+        let base = choice((
+            pointer,
+            function.clone(),
+            tuple.clone(),
+            generic.clone(),
+            primitive.clone(),
+            unit.clone(),
+            never.clone(),
+            named.clone(),
+        ))
+        .map_with(|kind, e| TypeAnnot {
+            span: to_range(e.span()),
+            file: String::new(),
+            type_: kind,
+        });
 
         base.clone()
             .then(
@@ -202,21 +231,50 @@ fn pattern<'src>()
             })
             .labelled("enum pattern");
 
+        let struct_pat_field = ident()
+            .then(just(Token::Colon).ignore_then(pat.clone()).or_not())
+            .map(|(field_name, pattern)| {
+                // If no pattern is provided, create a bind pattern with the same name
+                let pattern = match pattern {
+                    Some(pat) => pat,
+                    None => Pattern {
+                        span: 0..0, // This will be updated with actual span
+                        file: String::new(),
+                        pat: PatKind::Bind(field_name.clone()),
+                    },
+                };
+                (field_name, pattern)
+            });
+
         let struct_pat = ident()
             .then(
                 just(Token::LBrace)
                     .labelled("'{' for struct pattern")
                     .ignore_then(
-                        ident()
-                            .then_ignore(just(Token::Colon).labelled("':'"))
-                            .then(pat.clone())
+                        struct_pat_field
                             .separated_by(just(Token::Comma))
                             .allow_trailing()
                             .collect::<Vec<_>>(),
                     )
                     .then_ignore(just(Token::RBrace).labelled("'}' for struct pattern")),
             )
-            .map(|(name, fields)| PatKind::Struct { name, fields })
+            .map_with(|(name, fields), e| {
+                // Update spans for the bind patterns we created
+                let updated_fields: Vec<_> = fields
+                    .into_iter()
+                    .map(|(field_name, mut pattern)| {
+                        if let PatKind::Bind(_) = pattern.pat {
+                            pattern.span = e.span().start..e.span().start + field_name.len(); // approximate
+                            pattern.file = String::new();
+                        }
+                        (field_name, pattern)
+                    })
+                    .collect();
+                PatKind::Struct {
+                    name,
+                    fields: updated_fields,
+                }
+            })
             .labelled("struct pattern");
 
         let tuple_pat = just(Token::LParen)
@@ -581,14 +639,32 @@ fn expr<'src>()
                             .allow_trailing()
                             .collect::<Vec<_>>(),
                     )
-                    .then_ignore(just(Token::RParen)),
+                    .then_ignore(just(Token::RParen))
+                    .or_not(),
             )
-            .map(|((name, variant), args)| ExprKind::EnumConstruct {
+            .map(|((name, variant), args_opt)| ExprKind::EnumConstruct {
                 name,
                 variant,
-                args,
+                args: args_opt.unwrap_or_default(),
             })
             .labelled("enum construction");
+
+        let struct_construct = ident()
+            .then(
+                just(Token::LBrace)
+                    .labelled("'{' for struct construction")
+                    .ignore_then(
+                        ident()
+                            .then_ignore(just(Token::Colon).labelled("':'"))
+                            .then(expr.clone())
+                            .separated_by(just(Token::Comma))
+                            .allow_trailing()
+                            .collect::<Vec<_>>(),
+                    )
+                    .then_ignore(just(Token::RBrace).labelled("'}' for struct construction")),
+            )
+            .map(|(name, fields)| ExprKind::StructConstruct { name, fields })
+            .labelled("struct construction");
 
         let import = just(Token::KeywordImport)
             .ignore_then(select! { Token::String(s) => s })
@@ -660,6 +736,7 @@ fn expr<'src>()
             import,
             macro_call,
             enum_construct,
+            struct_construct,
             lambda,
             block,
             variable,
@@ -1817,7 +1894,9 @@ pub fn parser<'src>()
 
     let item = attributes
         .then(choice((
-            expr().map(ASTNodeKind::Expr),
+            expr()
+                .then_ignore(just(Token::Semicolon).or_not())
+                .map(ASTNodeKind::Expr),
             struct_def().map(ASTNodeKind::Struct),
             enum_def().map(ASTNodeKind::Enum),
             type_alias().map(ASTNodeKind::TypeAlias),

@@ -779,6 +779,28 @@ impl LambdaDesugarer {
                 expr: TypedExprKind::Import(import),
                 type_: expr.type_,
             },
+            TypedExprKind::StructConstruct {
+                struct_name,
+                struct_id,
+                fields,
+            } => {
+                let mut new_fields = Vec::new();
+                for (field_name, field_id, field_expr) in fields {
+                    let (desugared_field_expr, mut funcs) = self.desugar_expr(field_expr);
+                    new_functions.append(&mut funcs);
+                    new_fields.push((field_name, field_id, desugared_field_expr));
+                }
+                TypedExpr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: TypedExprKind::StructConstruct {
+                        struct_name,
+                        struct_id,
+                        fields: new_fields,
+                    },
+                    type_: expr.type_,
+                }
+            }
         };
 
         (new_expr, new_functions)

@@ -59,6 +59,7 @@ impl Type {
             }
             TypeKind::Never => "!".to_string(),
             TypeKind::Error => "<error>".to_string(),
+            TypeKind::Pointer(inner) => format!("*{}", inner.display(interner)),
             _ => format!("{:?}", self.type_),
         }
     }
@@ -120,6 +121,7 @@ pub enum TypeKind {
     Never,
     // Unit, // unit is a constructor
     Error,
+    Pointer(Rc<Type>), // For FFI and low-level operations
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
@@ -664,6 +666,11 @@ impl Substitution {
                 file: ty.file.clone(),
                 type_: TypeKind::Trait(types.to_vec()),
             }),
+            TypeKind::Pointer(inner) => Rc::new(Type {
+                span: ty.span.clone(),
+                file: ty.file.clone(),
+                type_: TypeKind::Pointer(self.apply(inner)),
+            }),
             TypeKind::Never | TypeKind::Error => ty.clone(),
         }
     }
@@ -758,11 +765,25 @@ impl TypeChecker {
                 ASTNodeKind::Struct(s) => {
                     let struct_id = self.id_gen.fresh_struct();
                     let name = self.interner.intern(&s.name);
+
+                    // Pre-register fields with their types
+                    let mut fields = HashMap::new();
+                    for (field_arg, vis) in &s.fields {
+                        let field_name = self.interner.intern(&field_arg.name);
+                        let field_id = self.id_gen.fresh_field();
+                        let field_type = if let Some(type_annot) = &field_arg.type_ {
+                            self.resolve_type_annot(type_annot)
+                        } else {
+                            self.fresh_type_var()
+                        };
+                        fields.insert(field_name, (field_id, field_type, *vis));
+                    }
+
                     let struct_info = StructInfo {
                         id: struct_id,
                         name,
                         type_params: vec![],
-                        fields: HashMap::new(),
+                        fields,
                     };
                     self.env.structs.insert(struct_id, struct_info);
                 }
@@ -1180,6 +1201,11 @@ impl TypeChecker {
                 file: ty.file.clone(),
                 type_: TypeKind::Trait(types.to_vec()),
             }),
+            TypeKind::Pointer(inner) => Rc::new(Type {
+                span: ty.span.clone(),
+                file: ty.file.clone(),
+                type_: TypeKind::Pointer(self.apply_local_subst_only(inner, local_subst)),
+            }),
             // Forall and Exists shouldn't appear in instantiation context as they should be handled at the instantiate level
             _ => ty.clone(),
         }
@@ -1220,6 +1246,9 @@ impl TypeChecker {
             }
             TypeKind::Forall { body, .. } | TypeKind::Exists { body, .. } => {
                 self.collect_free_vars(body, vars);
+            }
+            TypeKind::Pointer(inner) => {
+                self.collect_free_vars(inner, vars);
             }
             _ => {}
         }
@@ -1898,6 +1927,108 @@ impl TypeChecker {
                 }
 
                 self.error(expr, TypeErrorKind::UnboundVariable { name: variant_sym });
+                self.error_expr(expr)
+            }
+
+            ExprKind::StructConstruct { name, fields } => {
+                let struct_sym = self.interner.intern(name);
+
+                // Lookup struct in environment
+                let struct_info = self
+                    .env
+                    .structs
+                    .iter()
+                    .find(|(_, info)| info.name == struct_sym)
+                    .map(|(id, info)| (*id, info.clone()));
+
+                if let Some((struct_id, struct_info)) = struct_info {
+                    // Create a mapping from field names to their expected types
+                    let expected_fields: std::collections::HashMap<
+                        Symbol,
+                        (FieldId, Rc<Type>, Visibility),
+                    > = struct_info.fields.clone();
+
+                    // Type check each field expression
+                    let mut typed_fields = Vec::new();
+                    let mut processed_field_names = std::collections::HashSet::new();
+
+                    for (field_name, field_expr) in fields {
+                        let field_sym = self.interner.intern(field_name);
+
+                        // Check for duplicate field names
+                        if processed_field_names.contains(&field_sym) {
+                            self.error(expr, TypeErrorKind::DuplicateField { field: field_sym });
+                            continue;
+                        }
+                        processed_field_names.insert(field_sym);
+
+                        // Check if the field exists in the struct
+                        if let Some((field_id, expected_type, _vis)) =
+                            expected_fields.get(&field_sym)
+                        {
+                            let typed_field_expr = self.check_expr(field_expr);
+
+                            // Unify the field expression type with expected type
+                            self.unify(&typed_field_expr.type_, expected_type, &field_expr.span);
+
+                            typed_fields.push((field_sym, *field_id, typed_field_expr));
+                        } else {
+                            self.error(
+                                expr,
+                                TypeErrorKind::InvalidFieldAccess {
+                                    type_: Rc::new(Type {
+                                        span: Some(expr.span.clone()),
+                                        file: Some(expr.file.clone()),
+                                        type_: TypeKind::Constructor {
+                                            name: struct_sym.0,
+                                            args: vec![],
+                                            kind: Kind::Star,
+                                        },
+                                    }),
+                                    field: field_sym,
+                                },
+                            );
+                        }
+                    }
+
+                    // Check that all required fields are provided
+                    for (field_sym, (_field_id, _field_type, _vis)) in &struct_info.fields {
+                        if !processed_field_names.contains(field_sym) {
+                            self.error(
+                                expr,
+                                TypeErrorKind::MissingField {
+                                    struct_name: struct_sym,
+                                    field: *field_sym,
+                                },
+                            );
+                        }
+                    }
+
+                    // Create the struct type
+                    let struct_type = Rc::new(Type {
+                        span: Some(expr.span.clone()),
+                        file: Some(expr.file.clone()),
+                        type_: TypeKind::Constructor {
+                            name: struct_sym.0,
+                            args: vec![], // For now, no type parameters
+                            kind: Kind::Star,
+                        },
+                    });
+
+                    return TypedExpr {
+                        span: expr.span.clone(),
+                        file: expr.file.clone(),
+                        expr: TypedExprKind::StructConstruct {
+                            struct_name: struct_sym,
+                            struct_id,
+                            fields: typed_fields,
+                        },
+                        type_: struct_type,
+                    };
+                }
+
+                // Struct not found in environment
+                self.error(expr, TypeErrorKind::UnboundType { name: struct_sym });
                 self.error_expr(expr)
             }
 
@@ -2907,6 +3038,16 @@ impl TypeChecker {
                         id: var_id.0,
                         kind: k,
                     },
+                })
+            }
+
+            TypeAnnotKind::Pointer(inner_annot) => {
+                let inner_type = self.resolve_type_annot_with_params(inner_annot, type_param_map);
+
+                Rc::new(Type {
+                    span: Some(annot.span.clone()),
+                    file: Some(annot.file.clone()),
+                    type_: TypeKind::Pointer(inner_type),
                 })
             }
 
@@ -3923,6 +4064,7 @@ impl TypeChecker {
             TypeKind::Tuple(types) | TypeKind::Union(types) => {
                 types.iter().any(|t| self.occurs_check_inner(id, t))
             }
+            TypeKind::Pointer(inner) => self.occurs_check_inner(id, inner),
             _ => false,
         }
     }
@@ -4005,6 +4147,10 @@ impl TypeChecker {
                 for (ty1, ty2) in t1.iter().zip(t2.iter()) {
                     self.unify(ty1, ty2, span);
                 }
+            }
+
+            (TypeKind::Pointer(inner1), TypeKind::Pointer(inner2)) => {
+                self.unify(inner1, inner2, span);
             }
 
             _ => {
@@ -4680,6 +4826,24 @@ impl TypeChecker {
                 },
                 TypedExprKind::Error => TypedExprKind::Error,
                 TypedExprKind::Import(_) => expr.expr, // Import doesn't have type variables to substitute
+                TypedExprKind::StructConstruct {
+                    struct_name,
+                    struct_id,
+                    fields,
+                } => TypedExprKind::StructConstruct {
+                    struct_name,
+                    struct_id,
+                    fields: fields
+                        .into_iter()
+                        .map(|(field_name, field_id, field_expr)| {
+                            (
+                                field_name,
+                                field_id,
+                                self.apply_substitution_to_expr(field_expr),
+                            )
+                        })
+                        .collect(),
+                },
             },
             type_: self.substitution.apply(&expr.type_),
         }

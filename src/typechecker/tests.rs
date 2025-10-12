@@ -1352,3 +1352,1102 @@ fn test_collect_type_vars_rec() {
     monomorphizer.collect_type_vars_rec(&type_with_vars, &mut vars);
     assert!(vars.contains(&5));
 }
+
+// Struct Constructor Tests
+
+#[test]
+fn test_struct_constructor_basic() {
+    let mut tc = setup();
+
+    // Define a struct first
+    let struct_def = Struct {
+        span: dummy_span(),
+        file: dummy_file(),
+        name: "Point".to_string(),
+        type_params: vec![],
+        fields: vec![
+            (
+                FnArg {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    name: "x".to_string(),
+                    type_: Some(TypeAnnot {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        type_: TypeAnnotKind::Int,
+                    }),
+                },
+                Visibility::Public,
+            ),
+            (
+                FnArg {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    name: "y".to_string(),
+                    type_: Some(TypeAnnot {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        type_: TypeAnnotKind::Int,
+                    }),
+                },
+                Visibility::Public,
+            ),
+        ],
+        methods: vec![],
+        vis: Visibility::Public,
+    };
+
+    let _typed_struct = tc.check_struct(struct_def);
+
+    // Now test struct construction
+    let struct_construct = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::StructConstruct {
+            name: "Point".to_string(),
+            fields: vec![
+                (
+                    "x".to_string(),
+                    Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::Int(1),
+                    },
+                ),
+                (
+                    "y".to_string(),
+                    Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::Int(2),
+                    },
+                ),
+            ],
+        },
+    };
+
+    let typed = tc.check_expr(&struct_construct);
+    assert!(!tc.diagnostics.has_errors());
+
+    // Check that the result type is Point
+    match &typed.type_.type_ {
+        TypeKind::Constructor { name, .. } => {
+            assert_eq!(*name, tc.interner.intern("Point").0);
+        }
+        _ => panic!("Expected struct constructor to return a struct type"),
+    }
+}
+
+#[test]
+fn test_struct_constructor_type_mismatch() {
+    let mut tc = setup();
+
+    // Define a struct
+    let struct_def = Struct {
+        span: dummy_span(),
+        file: dummy_file(),
+        name: "Point".to_string(),
+        type_params: vec![],
+        fields: vec![(
+            FnArg {
+                span: dummy_span(),
+                file: dummy_file(),
+                name: "x".to_string(),
+                type_: Some(TypeAnnot {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    type_: TypeAnnotKind::Int,
+                }),
+            },
+            Visibility::Public,
+        )],
+        methods: vec![],
+        vis: Visibility::Public,
+    };
+
+    let _typed_struct = tc.check_struct(struct_def);
+
+    // Try to construct with wrong type
+    let struct_construct = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::StructConstruct {
+            name: "Point".to_string(),
+            fields: vec![(
+                "x".to_string(),
+                Expr {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    expr: ExprKind::Bool(true), // Wrong type: bool instead of int
+                },
+            )],
+        },
+    };
+
+    let _typed = tc.check_expr(&struct_construct);
+    assert!(tc.diagnostics.has_errors());
+}
+
+#[test]
+fn test_struct_constructor_missing_field() {
+    let mut tc = setup();
+
+    // Define a struct with two fields
+    let struct_def = Struct {
+        span: dummy_span(),
+        file: dummy_file(),
+        name: "Point".to_string(),
+        type_params: vec![],
+        fields: vec![
+            (
+                FnArg {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    name: "x".to_string(),
+                    type_: Some(TypeAnnot {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        type_: TypeAnnotKind::Int,
+                    }),
+                },
+                Visibility::Public,
+            ),
+            (
+                FnArg {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    name: "y".to_string(),
+                    type_: Some(TypeAnnot {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        type_: TypeAnnotKind::Int,
+                    }),
+                },
+                Visibility::Public,
+            ),
+        ],
+        methods: vec![],
+        vis: Visibility::Public,
+    };
+
+    let _typed_struct = tc.check_struct(struct_def);
+
+    // Try to construct with missing field
+    let struct_construct = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::StructConstruct {
+            name: "Point".to_string(),
+            fields: vec![(
+                "x".to_string(),
+                Expr {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    expr: ExprKind::Int(1),
+                },
+            )], // Missing 'y' field
+        },
+    };
+
+    let _typed = tc.check_expr(&struct_construct);
+    assert!(tc.diagnostics.has_errors());
+}
+
+#[test]
+fn test_struct_constructor_duplicate_field() {
+    let mut tc = setup();
+
+    // Define a struct
+    let struct_def = Struct {
+        span: dummy_span(),
+        file: dummy_file(),
+        name: "Point".to_string(),
+        type_params: vec![],
+        fields: vec![
+            (
+                FnArg {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    name: "x".to_string(),
+                    type_: Some(TypeAnnot {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        type_: TypeAnnotKind::Int,
+                    }),
+                },
+                Visibility::Public,
+            ),
+            (
+                FnArg {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    name: "y".to_string(),
+                    type_: Some(TypeAnnot {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        type_: TypeAnnotKind::Int,
+                    }),
+                },
+                Visibility::Public,
+            ),
+        ],
+        methods: vec![],
+        vis: Visibility::Public,
+    };
+
+    let _typed_struct = tc.check_struct(struct_def);
+
+    // Try to construct with duplicate field
+    let struct_construct = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::StructConstruct {
+            name: "Point".to_string(),
+            fields: vec![
+                (
+                    "x".to_string(),
+                    Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::Int(1),
+                    },
+                ),
+                (
+                    "x".to_string(), // Duplicate field name
+                    Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::Int(2),
+                    },
+                ),
+            ],
+        },
+    };
+
+    let _typed = tc.check_expr(&struct_construct);
+    assert!(tc.diagnostics.has_errors());
+}
+
+#[test]
+fn test_struct_constructor_with_nested_expressions() {
+    let mut tc = setup();
+
+    // Define a struct
+    let struct_def = Struct {
+        span: dummy_span(),
+        file: dummy_file(),
+        name: "Point".to_string(),
+        type_params: vec![],
+        fields: vec![
+            (
+                FnArg {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    name: "x".to_string(),
+                    type_: Some(TypeAnnot {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        type_: TypeAnnotKind::Int,
+                    }),
+                },
+                Visibility::Public,
+            ),
+            (
+                FnArg {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    name: "y".to_string(),
+                    type_: Some(TypeAnnot {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        type_: TypeAnnotKind::Int,
+                    }),
+                },
+                Visibility::Public,
+            ),
+        ],
+        methods: vec![],
+        vis: Visibility::Public,
+    };
+
+    let _typed_struct = tc.check_struct(struct_def);
+
+    // Test struct construction with nested expressions
+    let struct_construct = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::StructConstruct {
+            name: "Point".to_string(),
+            fields: vec![
+                (
+                    "x".to_string(),
+                    Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::BinOp(
+                            Box::new(Expr {
+                                span: dummy_span(),
+                                file: dummy_file(),
+                                expr: ExprKind::Int(1),
+                            }),
+                            BinOp::Add,
+                            Box::new(Expr {
+                                span: dummy_span(),
+                                file: dummy_file(),
+                                expr: ExprKind::Int(2),
+                            }),
+                        ),
+                    },
+                ),
+                (
+                    "y".to_string(),
+                    Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::BinOp(
+                            Box::new(Expr {
+                                span: dummy_span(),
+                                file: dummy_file(),
+                                expr: ExprKind::Int(3),
+                            }),
+                            BinOp::Mul,
+                            Box::new(Expr {
+                                span: dummy_span(),
+                                file: dummy_file(),
+                                expr: ExprKind::Int(4),
+                            }),
+                        ),
+                    },
+                ),
+            ],
+        },
+    };
+
+    let typed = tc.check_expr(&struct_construct);
+    assert!(!tc.diagnostics.has_errors());
+
+    // Check that the result type is Point
+    match &typed.type_.type_ {
+        TypeKind::Constructor { name, .. } => {
+            assert_eq!(*name, tc.interner.intern("Point").0);
+        }
+        _ => panic!("Expected struct constructor to return a struct type"),
+    }
+}
+
+#[test]
+fn test_struct_constructor_generic() {
+    let mut tc = setup();
+
+    // Define a generic struct
+    let struct_def = Struct {
+        span: dummy_span(),
+        file: dummy_file(),
+        name: "Box".to_string(),
+        type_params: vec![TypeParam {
+            name: "T".to_string(),
+            kind: None,
+            bounds: vec![],
+        }],
+        fields: vec![(
+            FnArg {
+                span: dummy_span(),
+                file: dummy_file(),
+                name: "value".to_string(),
+                type_: Some(TypeAnnot {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    type_: TypeAnnotKind::Variable {
+                        name: "T".to_string(),
+                        kind: None,
+                    },
+                }),
+            },
+            Visibility::Public,
+        )],
+        methods: vec![],
+        vis: Visibility::Public,
+    };
+
+    let _typed_struct = tc.check_struct(struct_def);
+
+    // Test generic struct construction with int
+    let struct_construct = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::StructConstruct {
+            name: "Box".to_string(),
+            fields: vec![(
+                "value".to_string(),
+                Expr {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    expr: ExprKind::Int(42),
+                },
+            )],
+        },
+    };
+
+    let typed = tc.check_expr(&struct_construct);
+    assert!(!tc.diagnostics.has_errors());
+
+    // Check that the result type is Box (the constructor type)
+    match &typed.type_.type_ {
+        TypeKind::Constructor { name, .. } => {
+            assert_eq!(*name, tc.interner.intern("Box").0);
+        }
+        _ => panic!("Expected struct constructor to return a struct type"),
+    }
+}
+
+#[test]
+fn test_struct_pattern_matching() {
+    let mut tc = setup();
+
+    // Define a struct
+    let struct_def = Struct {
+        span: dummy_span(),
+        file: dummy_file(),
+        name: "Point".to_string(),
+        type_params: vec![],
+        fields: vec![
+            (
+                FnArg {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    name: "x".to_string(),
+                    type_: Some(TypeAnnot {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        type_: TypeAnnotKind::Int,
+                    }),
+                },
+                Visibility::Public,
+            ),
+            (
+                FnArg {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    name: "y".to_string(),
+                    type_: Some(TypeAnnot {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        type_: TypeAnnotKind::Int,
+                    }),
+                },
+                Visibility::Public,
+            ),
+        ],
+        methods: vec![],
+        vis: Visibility::Public,
+    };
+
+    let _typed_struct = tc.check_struct(struct_def);
+
+    // Create a struct instance to match against
+    let struct_instance = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::StructConstruct {
+            name: "Point".to_string(),
+            fields: vec![
+                (
+                    "x".to_string(),
+                    Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::Int(1),
+                    },
+                ),
+                (
+                    "y".to_string(),
+                    Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::Int(2),
+                    },
+                ),
+            ],
+        },
+    };
+
+    // Test match with struct pattern
+    let match_expr = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::Match(
+            Box::new(struct_instance),
+            vec![MatchArm {
+                pattern: Pattern {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    pat: PatKind::Struct {
+                        name: "Point".to_string(),
+                        fields: vec![
+                            (
+                                "x".to_string(),
+                                Pattern {
+                                    span: dummy_span(),
+                                    file: dummy_file(),
+                                    pat: PatKind::Bind("a".to_string()),
+                                },
+                            ),
+                            (
+                                "y".to_string(),
+                                Pattern {
+                                    span: dummy_span(),
+                                    file: dummy_file(),
+                                    pat: PatKind::Bind("b".to_string()),
+                                },
+                            ),
+                        ],
+                    },
+                },
+                guard: None,
+                body: Box::new(Expr {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    expr: ExprKind::BinOp(
+                        Box::new(Expr {
+                            span: dummy_span(),
+                            file: dummy_file(),
+                            expr: ExprKind::Variable("a".to_string()),
+                        }),
+                        BinOp::Add,
+                        Box::new(Expr {
+                            span: dummy_span(),
+                            file: dummy_file(),
+                            expr: ExprKind::Variable("b".to_string()),
+                        }),
+                    ),
+                }),
+                span: dummy_span(),
+            }],
+        ),
+    };
+
+    let _typed = tc.check_expr(&match_expr);
+    assert!(!tc.diagnostics.has_errors());
+}
+
+#[test]
+fn test_struct_pattern_shorthand() {
+    let mut tc = setup();
+
+    // Define a struct
+    let struct_def = Struct {
+        span: dummy_span(),
+        file: dummy_file(),
+        name: "Point".to_string(),
+        type_params: vec![],
+        fields: vec![
+            (
+                FnArg {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    name: "x".to_string(),
+                    type_: Some(TypeAnnot {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        type_: TypeAnnotKind::Int,
+                    }),
+                },
+                Visibility::Public,
+            ),
+            (
+                FnArg {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    name: "y".to_string(),
+                    type_: Some(TypeAnnot {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        type_: TypeAnnotKind::Int,
+                    }),
+                },
+                Visibility::Public,
+            ),
+        ],
+        methods: vec![],
+        vis: Visibility::Public,
+    };
+
+    let _typed_struct = tc.check_struct(struct_def);
+
+    // Create a struct instance to match against
+    let struct_instance = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::StructConstruct {
+            name: "Point".to_string(),
+            fields: vec![
+                (
+                    "x".to_string(),
+                    Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::Int(3),
+                    },
+                ),
+                (
+                    "y".to_string(),
+                    Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::Int(4),
+                    },
+                ),
+            ],
+        },
+    };
+
+    // Test match with struct pattern using shorthand (x, y becomes x: x, y: y)
+    // Note: This test verifies that the typechecker can handle patterns with shorthand
+    let match_expr = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::Match(
+            Box::new(struct_instance),
+            vec![MatchArm {
+                pattern: Pattern {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    pat: PatKind::Struct {
+                        name: "Point".to_string(),
+                        fields: vec![
+                            (
+                                "x".to_string(),
+                                Pattern {
+                                    span: dummy_span(),
+                                    file: dummy_file(),
+                                    pat: PatKind::Bind("x".to_string()), // shorthand: x binds to field x
+                                },
+                            ),
+                            (
+                                "y".to_string(),
+                                Pattern {
+                                    span: dummy_span(),
+                                    file: dummy_file(),
+                                    pat: PatKind::Bind("y".to_string()), // shorthand: y binds to field y
+                                },
+                            ),
+                        ],
+                    },
+                },
+                guard: None,
+                body: Box::new(Expr {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    expr: ExprKind::Variable("x".to_string()),
+                }),
+                span: dummy_span(),
+            }],
+        ),
+    };
+
+    let _typed = tc.check_expr(&match_expr);
+    assert!(!tc.diagnostics.has_errors());
+}
+
+#[test]
+fn test_nested_structs() {
+    let mut tc = setup();
+
+    // Define inner struct
+    let inner_struct = Struct {
+        span: dummy_span(),
+        file: dummy_file(),
+        name: "Point".to_string(),
+        type_params: vec![],
+        fields: vec![
+            (
+                FnArg {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    name: "x".to_string(),
+                    type_: Some(TypeAnnot {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        type_: TypeAnnotKind::Int,
+                    }),
+                },
+                Visibility::Public,
+            ),
+            (
+                FnArg {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    name: "y".to_string(),
+                    type_: Some(TypeAnnot {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        type_: TypeAnnotKind::Int,
+                    }),
+                },
+                Visibility::Public,
+            ),
+        ],
+        methods: vec![],
+        vis: Visibility::Public,
+    };
+
+    let _typed_inner = tc.check_struct(inner_struct);
+
+    // Define outer struct that contains inner struct
+    let outer_struct = Struct {
+        span: dummy_span(),
+        file: dummy_file(),
+        name: "Line".to_string(),
+        type_params: vec![],
+        fields: vec![
+            (
+                FnArg {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    name: "start".to_string(),
+                    type_: Some(TypeAnnot {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        type_: TypeAnnotKind::Named("Point".to_string()),
+                    }),
+                },
+                Visibility::Public,
+            ),
+            (
+                FnArg {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    name: "end".to_string(),
+                    type_: Some(TypeAnnot {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        type_: TypeAnnotKind::Named("Point".to_string()),
+                    }),
+                },
+                Visibility::Public,
+            ),
+        ],
+        methods: vec![],
+        vis: Visibility::Public,
+    };
+
+    let _typed_outer = tc.check_struct(outer_struct);
+
+    // Test nested struct construction
+    let nested_construct = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::StructConstruct {
+            name: "Line".to_string(),
+            fields: vec![
+                (
+                    "start".to_string(),
+                    Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::StructConstruct {
+                            name: "Point".to_string(),
+                            fields: vec![
+                                (
+                                    "x".to_string(),
+                                    Expr {
+                                        span: dummy_span(),
+                                        file: dummy_file(),
+                                        expr: ExprKind::Int(0),
+                                    },
+                                ),
+                                (
+                                    "y".to_string(),
+                                    Expr {
+                                        span: dummy_span(),
+                                        file: dummy_file(),
+                                        expr: ExprKind::Int(0),
+                                    },
+                                ),
+                            ],
+                        },
+                    },
+                ),
+                (
+                    "end".to_string(),
+                    Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::StructConstruct {
+                            name: "Point".to_string(),
+                            fields: vec![
+                                (
+                                    "x".to_string(),
+                                    Expr {
+                                        span: dummy_span(),
+                                        file: dummy_file(),
+                                        expr: ExprKind::Int(10),
+                                    },
+                                ),
+                                (
+                                    "y".to_string(),
+                                    Expr {
+                                        span: dummy_span(),
+                                        file: dummy_file(),
+                                        expr: ExprKind::Int(10),
+                                    },
+                                ),
+                            ],
+                        },
+                    },
+                ),
+            ],
+        },
+    };
+
+    let typed = tc.check_expr(&nested_construct);
+    assert!(!tc.diagnostics.has_errors());
+
+    // Check that the result type is Line
+    match &typed.type_.type_ {
+        TypeKind::Constructor { name, .. } => {
+            assert_eq!(*name, tc.interner.intern("Line").0);
+        }
+        _ => panic!("Expected struct constructor to return Line type"),
+    }
+}
+
+#[test]
+fn test_struct_constructor_empty() {
+    let mut tc = setup();
+
+    // Define an empty struct
+    let struct_def = Struct {
+        span: dummy_span(),
+        file: dummy_file(),
+        name: "Empty".to_string(),
+        type_params: vec![],
+        fields: vec![],
+        methods: vec![],
+        vis: Visibility::Public,
+    };
+
+    let _typed_struct = tc.check_struct(struct_def);
+
+    // Test empty struct construction
+    let struct_construct = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::StructConstruct {
+            name: "Empty".to_string(),
+            fields: vec![], // No fields
+        },
+    };
+
+    let typed = tc.check_expr(&struct_construct);
+    assert!(!tc.diagnostics.has_errors());
+
+    // Check that the result type is Empty
+    match &typed.type_.type_ {
+        TypeKind::Constructor { name, .. } => {
+            assert_eq!(*name, tc.interner.intern("Empty").0);
+        }
+        _ => panic!("Expected struct constructor to return Empty type"),
+    }
+}
+
+#[test]
+fn test_struct_constructor_with_string_and_bool_fields() {
+    let mut tc = setup();
+
+    // Define a struct with different field types
+    let struct_def = Struct {
+        span: dummy_span(),
+        file: dummy_file(),
+        name: "Mixed".to_string(),
+        type_params: vec![],
+        fields: vec![
+            (
+                FnArg {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    name: "text".to_string(),
+                    type_: Some(TypeAnnot {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        type_: TypeAnnotKind::String,
+                    }),
+                },
+                Visibility::Public,
+            ),
+            (
+                FnArg {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    name: "flag".to_string(),
+                    type_: Some(TypeAnnot {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        type_: TypeAnnotKind::Bool,
+                    }),
+                },
+                Visibility::Public,
+            ),
+        ],
+        methods: vec![],
+        vis: Visibility::Public,
+    };
+
+    let _typed_struct = tc.check_struct(struct_def);
+
+    // Test struct construction with mixed types
+    let struct_construct = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::StructConstruct {
+            name: "Mixed".to_string(),
+            fields: vec![
+                (
+                    "text".to_string(),
+                    Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::String("hello".to_string()),
+                    },
+                ),
+                (
+                    "flag".to_string(),
+                    Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::Bool(true),
+                    },
+                ),
+            ],
+        },
+    };
+
+    let typed = tc.check_expr(&struct_construct);
+    assert!(!tc.diagnostics.has_errors());
+
+    // Check that the result type is Mixed
+    match &typed.type_.type_ {
+        TypeKind::Constructor { name, .. } => {
+            assert_eq!(*name, tc.interner.intern("Mixed").0);
+        }
+        _ => panic!("Expected struct constructor to return Mixed type"),
+    }
+}
+
+#[test]
+fn test_struct_pattern_with_different_types() {
+    let mut tc = setup();
+
+    // Define a struct with different field types
+    let struct_def = Struct {
+        span: dummy_span(),
+        file: dummy_file(),
+        name: "Mixed".to_string(),
+        type_params: vec![],
+        fields: vec![
+            (
+                FnArg {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    name: "text".to_string(),
+                    type_: Some(TypeAnnot {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        type_: TypeAnnotKind::String,
+                    }),
+                },
+                Visibility::Public,
+            ),
+            (
+                FnArg {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    name: "flag".to_string(),
+                    type_: Some(TypeAnnot {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        type_: TypeAnnotKind::Bool,
+                    }),
+                },
+                Visibility::Public,
+            ),
+        ],
+        methods: vec![],
+        vis: Visibility::Public,
+    };
+
+    let _typed_struct = tc.check_struct(struct_def);
+
+    // Create a struct instance to match against
+    let struct_instance = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::StructConstruct {
+            name: "Mixed".to_string(),
+            fields: vec![
+                (
+                    "text".to_string(),
+                    Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::String("test".to_string()),
+                    },
+                ),
+                (
+                    "flag".to_string(),
+                    Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::Bool(false),
+                    },
+                ),
+            ],
+        },
+    };
+
+    // Test match with struct pattern on mixed types
+    let match_expr = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::Match(
+            Box::new(struct_instance),
+            vec![MatchArm {
+                pattern: Pattern {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    pat: PatKind::Struct {
+                        name: "Mixed".to_string(),
+                        fields: vec![
+                            (
+                                "text".to_string(),
+                                Pattern {
+                                    span: dummy_span(),
+                                    file: dummy_file(),
+                                    pat: PatKind::Bind("t".to_string()),
+                                },
+                            ),
+                            (
+                                "flag".to_string(),
+                                Pattern {
+                                    span: dummy_span(),
+                                    file: dummy_file(),
+                                    pat: PatKind::Bind("f".to_string()),
+                                },
+                            ),
+                        ],
+                    },
+                },
+                guard: None,
+                body: Box::new(Expr {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    expr: ExprKind::Variable("t".to_string()),
+                }),
+                span: dummy_span(),
+            }],
+        ),
+    };
+
+    let _typed = tc.check_expr(&match_expr);
+    assert!(!tc.diagnostics.has_errors());
+}
