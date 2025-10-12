@@ -8,10 +8,12 @@ pub mod cfg;
 pub mod display;
 pub mod function;
 pub mod instruction;
-pub mod tests;
 pub mod types;
 pub mod utils;
 pub mod value;
+
+#[cfg(test)]
+pub mod tests;
 
 pub use builder::Builder;
 pub use cfg::ControlFlowGraph;
