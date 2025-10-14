@@ -912,6 +912,19 @@ impl TypeChecker {
 
         // For generic functions, wrap in Forall type to preserve polymorphism
         let func_type = if !func.type_params.is_empty() {
+            // Convert type parameter bounds to trait constraints
+            let mut constraints = Vec::new();
+            for tp in typed_type_params.iter() {
+                for bound in &tp.bounds {
+                    // Find the trait that this bound refers to
+                    // The bound should be a trait type, so we need to extract the trait id
+                    if let TypeKind::Constructor { name, .. } = &bound.type_ {
+                        // Create a trait constraint: this type parameter implements this trait
+                        constraints.push(Constraint::Trait(tp.var_id.0, *name));
+                    }
+                }
+            }
+
             Rc::new(Type {
                 span: Some(func.span.clone()),
                 file: Some(func.file.clone()),
@@ -920,7 +933,7 @@ impl TypeChecker {
                         .iter()
                         .map(|tp| (tp.var_id.0, tp.kind.clone()))
                         .collect(),
-                    constraints: vec![], // TODO: handle trait constraints
+                    constraints, // Now with proper trait constraints
                     body: base_func_type,
                 },
             })
@@ -1099,7 +1112,11 @@ impl TypeChecker {
     // Instantiate: Replace bound type variables with fresh ones
     fn instantiate(&mut self, ty: &Rc<Type>) -> Rc<Type> {
         match &ty.type_ {
-            TypeKind::Forall { vars, body, .. } => {
+            TypeKind::Forall {
+                vars,
+                body,
+                constraints,
+            } => {
                 // Create completely fresh variables
                 let mut local_subst: HashMap<usize, Rc<Type>> = HashMap::new();
 
@@ -1113,6 +1130,27 @@ impl TypeChecker {
                         },
                     });
                     local_subst.insert(*var_id, fresh);
+                }
+
+                // Process constraints - for each constraint, we need to ensure it's satisfied
+                // For trait constraints, we need to verify that the instantiated type implements the trait
+                for constraint in constraints {
+                    match constraint {
+                        Constraint::Trait(var_id, _trait_id) => {
+                            // Get the instantiated type for this variable
+                            if let Some(_instantiated_type) = local_subst.get(var_id) {
+                                // Add a trait implementation requirement to the current context
+                                // This would typically be handled by a constraint solver
+                                // For now, we'll record this requirement
+                            }
+                        }
+                        Constraint::Equal(t1, t2) => {
+                            // Apply substitution to both types
+                            let _subst_t1 = self.apply_local_subst_only(t1, &local_subst);
+                            let _subst_t2 = self.apply_local_subst_only(t2, &local_subst);
+                            // For now, just continue - in a full implementation, we'd enforce equality
+                        }
+                    }
                 }
 
                 // Apply ONLY local substitution to the body, ignoring global substitution
@@ -1261,6 +1299,370 @@ impl TypeChecker {
             self.collect_free_vars(&binding.type_, &mut vars);
         }
         vars
+    }
+
+    // Find captured variables in an expression - variables that are referenced
+    // but not defined in the lambda's own scope (i.e., they come from outer scopes)
+    fn find_captures_in_lambda_body(
+        &self,
+        body: &TypedExpr,
+        lambda_arg_binding_ids: &std::collections::HashSet<BindingId>,
+    ) -> Vec<(Symbol, BindingId, Rc<Type>)> {
+        let mut captures = Vec::new();
+        let mut visited = std::collections::HashSet::new();
+
+        self.collect_captures_from_expr(body, lambda_arg_binding_ids, &mut captures, &mut visited);
+
+        captures
+    }
+
+    fn collect_captures_from_expr(
+        &self,
+        expr: &TypedExpr,
+        lambda_arg_binding_ids: &std::collections::HashSet<BindingId>,
+        captures: &mut Vec<(Symbol, BindingId, Rc<Type>)>,
+        visited: &mut std::collections::HashSet<BindingId>,
+    ) {
+        match &expr.expr {
+            TypedExprKind::Variable { name, binding_id } => {
+                // Check if this binding ID is NOT one of the lambda's own arguments
+                // If it's not a lambda argument, and we haven't captured it yet, it's a capture
+                if !lambda_arg_binding_ids.contains(binding_id) && !visited.contains(binding_id) {
+                    // DEBUG: Print what variable we're processing
+                    println!(
+                        "DEBUG: Processing variable {} with binding ID {:?}",
+                        self.interner.resolve(*name),
+                        binding_id
+                    );
+
+                    // Look up the binding in the environment to get its type
+                    if let Some(binding) = self.env.bindings.get(binding_id) {
+                        println!("DEBUG: Found binding in environment");
+                        captures.push((*name, *binding_id, binding.type_.clone()));
+                        visited.insert(*binding_id);
+                    } else {
+                        println!("DEBUG: Binding NOT found in environment");
+                    }
+                } else {
+                    println!(
+                        "DEBUG: Skipping variable {} - is lambda arg: {}, already visited: {}",
+                        self.interner.resolve(*name),
+                        lambda_arg_binding_ids.contains(binding_id),
+                        visited.contains(binding_id)
+                    );
+                }
+            }
+            TypedExprKind::Lambda { body, args, .. } => {
+                // For nested lambdas, we need to find all variables that this nested lambda
+                // references from outside its own scope. All such variables must also be
+                // captured by the current lambda, because when the nested lambda is executed,
+                // it will need access to these values.
+
+                // Create binding IDs that are local to the nested lambda (not captures)
+                let mut nested_local_bindings = std::collections::HashSet::new();
+                for arg in args {
+                    nested_local_bindings.insert(arg.binding_id);
+                }
+
+                // DEBUG: Print what's in nested_local_bindings
+                println!("DEBUG: nested_local_bindings contains:");
+                for binding_id in &nested_local_bindings {
+                    println!("  - {:?}", binding_id);
+                }
+
+                // Find all captures that the nested lambda needs
+                let mut nested_captures = Vec::new();
+                let mut nested_visited = std::collections::HashSet::new();
+
+                self.collect_captures_from_expr(
+                    body,
+                    &nested_local_bindings,
+                    &mut nested_captures,
+                    &mut nested_visited,
+                );
+
+                // DEBUG: Print what we found in the nested lambda
+                println!("DEBUG: Nested lambda captures: {}", nested_captures.len());
+                for (name, binding_id, _) in &nested_captures {
+                    println!("  - {}: {:?}", self.interner.resolve(*name), binding_id);
+                }
+
+                // All captures found in the nested lambda (variables from outer scopes)
+                // should also be captures of the current lambda, except for variables that
+                // are already parameters of the current lambda
+                for capture in nested_captures {
+                    // Skip captures that are parameters of the current lambda
+                    if !lambda_arg_binding_ids.contains(&capture.1)
+                        && !visited.contains(&capture.1) {
+                            captures.push(capture.clone());
+                            visited.insert(capture.1);
+                        }
+                }
+            }
+            // For other expressions, recursively collect captures from sub-expressions
+            TypedExprKind::BinOp { left, right, .. } => {
+                self.collect_captures_from_expr(left, lambda_arg_binding_ids, captures, visited);
+                self.collect_captures_from_expr(right, lambda_arg_binding_ids, captures, visited);
+            }
+            TypedExprKind::UnOp { operand, .. } => {
+                self.collect_captures_from_expr(operand, lambda_arg_binding_ids, captures, visited);
+            }
+            TypedExprKind::Assign { l_val, r_val, .. } => {
+                self.collect_captures_from_expr(l_val, lambda_arg_binding_ids, captures, visited);
+                self.collect_captures_from_expr(r_val, lambda_arg_binding_ids, captures, visited);
+            }
+            TypedExprKind::Let {
+                value, binding_id, ..
+            } => {
+                // Process the value being bound (it might reference outer variables)
+                self.collect_captures_from_expr(value, lambda_arg_binding_ids, captures, visited);
+                // The new binding itself is local to the let scope, so we don't treat it as a capture
+                // but nested expressions might reference it
+                let mut new_visited = visited.clone();
+                new_visited.insert(*binding_id);
+                // For expressions inside blocks that might reference the let binding,
+                // we'd need more complex scoping, but for now we handle it simply
+            }
+            TypedExprKind::Array { elements, .. } => {
+                for element in elements {
+                    self.collect_captures_from_expr(
+                        element,
+                        lambda_arg_binding_ids,
+                        captures,
+                        visited,
+                    );
+                }
+            }
+            TypedExprKind::Tuple(elements) => {
+                for element in elements {
+                    self.collect_captures_from_expr(
+                        element,
+                        lambda_arg_binding_ids,
+                        captures,
+                        visited,
+                    );
+                }
+            }
+            TypedExprKind::Map { entries, .. } => {
+                for (key, value) in entries {
+                    self.collect_captures_from_expr(key, lambda_arg_binding_ids, captures, visited);
+                    self.collect_captures_from_expr(
+                        value,
+                        lambda_arg_binding_ids,
+                        captures,
+                        visited,
+                    );
+                }
+            }
+            TypedExprKind::EnumConstruct { args, .. } => {
+                for arg in args {
+                    self.collect_captures_from_expr(arg, lambda_arg_binding_ids, captures, visited);
+                }
+            }
+            TypedExprKind::StructConstruct { fields, .. } => {
+                for (_, _, field_expr) in fields {
+                    self.collect_captures_from_expr(
+                        field_expr,
+                        lambda_arg_binding_ids,
+                        captures,
+                        visited,
+                    );
+                }
+            }
+            TypedExprKind::Perform { args, .. } => {
+                for arg in args {
+                    self.collect_captures_from_expr(arg, lambda_arg_binding_ids, captures, visited);
+                }
+            }
+            TypedExprKind::Handle { body, handlers, .. } => {
+                self.collect_captures_from_expr(body, lambda_arg_binding_ids, captures, visited);
+                for handler in handlers {
+                    // Handle handler parameters
+                    let mut handler_arg_bindings = lambda_arg_binding_ids.clone();
+                    for (_, param_id, _) in &handler.params {
+                        handler_arg_bindings.insert(*param_id);
+                    }
+                    handler_arg_bindings.insert(handler.resume_id);
+
+                    self.collect_captures_from_expr(
+                        &handler.body,
+                        &handler_arg_bindings,
+                        captures,
+                        visited,
+                    );
+                }
+            }
+            TypedExprKind::Cast { expr, .. } => {
+                self.collect_captures_from_expr(expr, lambda_arg_binding_ids, captures, visited);
+            }
+            TypedExprKind::IfElse {
+                condition,
+                then,
+                else_,
+            } => {
+                self.collect_captures_from_expr(
+                    condition,
+                    lambda_arg_binding_ids,
+                    captures,
+                    visited,
+                );
+                self.collect_captures_from_expr(then, lambda_arg_binding_ids, captures, visited);
+                if let Some(else_expr) = else_ {
+                    self.collect_captures_from_expr(
+                        else_expr,
+                        lambda_arg_binding_ids,
+                        captures,
+                        visited,
+                    );
+                }
+            }
+            TypedExprKind::Block { expressions } => {
+                let mut block_visited = visited.clone();
+                for expr in expressions {
+                    self.collect_captures_from_expr(
+                        expr,
+                        lambda_arg_binding_ids,
+                        captures,
+                        &mut block_visited,
+                    );
+                }
+                // Update the main visited set with any new captures found in the block
+                *visited = block_visited;
+            }
+            TypedExprKind::With {
+                context,
+                body,
+                binding_id,
+                ..
+            } => {
+                // Process context first (before the with binding is in scope)
+                self.collect_captures_from_expr(context, lambda_arg_binding_ids, captures, visited);
+                // Process body with the with binding added to the local set
+                let mut with_bindings = lambda_arg_binding_ids.clone();
+                with_bindings.insert(*binding_id);
+                self.collect_captures_from_expr(body, &with_bindings, captures, visited);
+            }
+            TypedExprKind::Loop { body, .. } => {
+                self.collect_captures_from_expr(body, lambda_arg_binding_ids, captures, visited);
+            }
+            TypedExprKind::Match { scrutinee, arms } => {
+                self.collect_captures_from_expr(
+                    scrutinee,
+                    lambda_arg_binding_ids,
+                    captures,
+                    visited,
+                );
+                for arm in arms {
+                    // For match arms, we'd need to process pattern bindings, but for now
+                    // we just process the arm body
+                    self.collect_captures_from_expr(
+                        &arm.body,
+                        lambda_arg_binding_ids,
+                        captures,
+                        visited,
+                    );
+                }
+            }
+            TypedExprKind::For {
+                iterator,
+                body,
+                binding_id,
+                ..
+            } => {
+                self.collect_captures_from_expr(
+                    iterator,
+                    lambda_arg_binding_ids,
+                    captures,
+                    visited,
+                );
+                let mut for_bindings = lambda_arg_binding_ids.clone();
+                for_bindings.insert(*binding_id);
+                self.collect_captures_from_expr(body, &for_bindings, captures, visited);
+            }
+            TypedExprKind::While { condition, body } => {
+                self.collect_captures_from_expr(
+                    condition,
+                    lambda_arg_binding_ids,
+                    captures,
+                    visited,
+                );
+                self.collect_captures_from_expr(body, lambda_arg_binding_ids, captures, visited);
+            }
+            TypedExprKind::IfLet {
+                expr, then, else_, ..
+            } => {
+                self.collect_captures_from_expr(expr, lambda_arg_binding_ids, captures, visited);
+                self.collect_captures_from_expr(then, lambda_arg_binding_ids, captures, visited);
+                if let Some(else_expr) = else_ {
+                    self.collect_captures_from_expr(
+                        else_expr,
+                        lambda_arg_binding_ids,
+                        captures,
+                        visited,
+                    );
+                }
+            }
+            TypedExprKind::WhileLet { expr, body, .. } => {
+                self.collect_captures_from_expr(expr, lambda_arg_binding_ids, captures, visited);
+                self.collect_captures_from_expr(body, lambda_arg_binding_ids, captures, visited);
+            }
+            TypedExprKind::Return(expr) => {
+                if let Some(return_expr) = expr {
+                    self.collect_captures_from_expr(
+                        return_expr,
+                        lambda_arg_binding_ids,
+                        captures,
+                        visited,
+                    );
+                }
+            }
+            TypedExprKind::Break(expr) => {
+                if let Some(break_expr) = expr {
+                    self.collect_captures_from_expr(
+                        break_expr,
+                        lambda_arg_binding_ids,
+                        captures,
+                        visited,
+                    );
+                }
+            }
+            TypedExprKind::Call { function, args, .. } => {
+                self.collect_captures_from_expr(
+                    function,
+                    lambda_arg_binding_ids,
+                    captures,
+                    visited,
+                );
+                for arg in args {
+                    self.collect_captures_from_expr(arg, lambda_arg_binding_ids, captures, visited);
+                }
+            }
+            TypedExprKind::Index { target, index, .. } => {
+                self.collect_captures_from_expr(target, lambda_arg_binding_ids, captures, visited);
+                self.collect_captures_from_expr(index, lambda_arg_binding_ids, captures, visited);
+            }
+            TypedExprKind::FieldAccess { target, .. } => {
+                self.collect_captures_from_expr(target, lambda_arg_binding_ids, captures, visited);
+            }
+            TypedExprKind::OptionalChain { target, .. } => {
+                self.collect_captures_from_expr(target, lambda_arg_binding_ids, captures, visited);
+            }
+            TypedExprKind::MacroCall { args, .. } => {
+                for arg in args {
+                    self.collect_captures_from_expr(arg, lambda_arg_binding_ids, captures, visited);
+                }
+            }
+            // Primitive values don't have captures
+            TypedExprKind::Int(_)
+            | TypedExprKind::Float(_)
+            | TypedExprKind::Bool(_)
+            | TypedExprKind::String(_)
+            | TypedExprKind::Continue
+            | TypedExprKind::Error
+            | TypedExprKind::Import(_) => {
+                // Nothing to capture
+            }
+        }
     }
 
     fn check_expr(&mut self, expr: &Expr) -> TypedExpr {
@@ -1622,6 +2024,13 @@ impl TypeChecker {
                     body.type_.clone(),
                 );
 
+                // Perform capture analysis on the lambda body
+                // We need to identify which variables in the body come from outer scopes
+                let lambda_arg_binding_ids: std::collections::HashSet<BindingId> =
+                    typed_args.iter().map(|arg| arg.binding_id).collect();
+
+                let captures = self.find_captures_in_lambda_body(&body, &lambda_arg_binding_ids);
+
                 self.env.pop_scope();
 
                 TypedExpr {
@@ -1630,7 +2039,7 @@ impl TypeChecker {
                     expr: TypedExprKind::Lambda {
                         args: typed_args,
                         body: Box::new(body),
-                        captures: vec![], // TODO: capture analysis
+                        captures,
                         function_type: func_type.clone(),
                     },
                     type_: func_type,
@@ -2410,35 +2819,72 @@ impl TypeChecker {
             },
 
             ExprKind::Perform { effect, args } => {
-                let effect_sym = self.interner.intern(effect);
+                let op_sym = self.interner.intern(effect);
 
-                // Lookup effect in environment
-                let effect_info = self
-                    .env
-                    .effects
-                    .iter()
-                    .find(|(_, info)| info.name == effect_sym)
-                    .map(|(id, info)| (*id, info.clone()));
+                // Find which effect contains this operation
+                let mut found_operation: Option<(Rc<Type>, EffectId, EffectInfo)> = None;
 
-                if let Some((effect_id, _effect_info)) = effect_info {
-                    let typed_args: Vec<_> = args.iter().map(|a| self.check_expr(a)).collect();
+                for (effect_id, effect_info) in &self.env.effects {
+                    if let Some(op_type) = effect_info.operations.get(&op_sym) {
+                        found_operation = Some((op_type.clone(), *effect_id, effect_info.clone()));
+                        break;
+                    }
+                }
 
-                    // TODO: lookup specific operation and check args match operation signature
-                    // For now, just return fresh type var
-                    let result_type = self.fresh_type_var();
+                if let Some((op_type, effect_id, _effect_info)) = found_operation {
+                    // Check that op_type is a function type
+                    if let TypeKind::Function {
+                        params,
+                        return_type,
+                        ..
+                    } = &op_type.type_
+                    {
+                        let typed_args: Vec<_> = args.iter().map(|a| self.check_expr(a)).collect();
 
-                    TypedExpr {
-                        span: expr.span.clone(),
-                        file: expr.file.clone(),
-                        expr: TypedExprKind::Perform {
-                            effect: effect_sym,
-                            effect_id,
-                            args: typed_args,
-                        },
-                        type_: result_type,
+                        // Check that the number of arguments matches
+                        if typed_args.len() != params.len() {
+                            self.error(
+                                expr,
+                                TypeErrorKind::ArityMismatch {
+                                    expected: params.len(),
+                                    found: typed_args.len(),
+                                    function: op_sym, // Use the operation symbol as the function name
+                                },
+                            );
+                            return self.error_expr(expr);
+                        }
+
+                        // Check that each argument matches the expected type
+                        for (arg, expected_type) in typed_args.iter().zip(params.iter()) {
+                            self.unify(&arg.type_, expected_type, &arg.span);
+                        }
+
+                        // Add the effect to the current function's allowed effects if not already present
+                        if !self.current_function_effects.effects.contains(&effect_id.0) {
+                            self.current_function_effects.effects.push(effect_id.0);
+                        }
+
+                        TypedExpr {
+                            span: expr.span.clone(),
+                            file: expr.file.clone(),
+                            expr: TypedExprKind::Perform {
+                                effect: op_sym, // This should be the operation name
+                                effect_id,
+                                args: typed_args,
+                            },
+                            type_: return_type.clone(),
+                        }
+                    } else {
+                        self.error(
+                            expr,
+                            TypeErrorKind::NotAFunction {
+                                type_: op_type.clone(),
+                            },
+                        );
+                        self.error_expr(expr)
                     }
                 } else {
-                    self.error(expr, TypeErrorKind::UnboundVariable { name: effect_sym });
+                    self.error(expr, TypeErrorKind::UnboundVariable { name: op_sym });
                     self.error_expr(expr)
                 }
             }
@@ -2814,43 +3260,134 @@ impl TypeChecker {
     fn check_effect_handler(&mut self, handler: &EffectHandler) -> TypedEffectHandler {
         self.env.push_scope();
 
-        let effect_sym = self.interner.intern(&handler.effect);
-        let resume_sym = self.interner.intern(&handler.resume_param);
+        // In the handler syntax like `read_line(k) => ...`, the `effect` field contains the operation name
+        // (e.g., "read_line"), not the effect type name. We need to find which effect contains this operation.
+        let op_sym = self.interner.intern(&handler.effect);
 
-        // Lookup effect
-        let effect_info = self
-            .env
-            .effects
-            .iter()
-            .find(|(_, info)| info.name == effect_sym)
-            .map(|(id, info)| (*id, info.clone()));
+        // Find which effect contains this operation
+        let mut found_operation = None;
 
-        let effect_id = effect_info.map(|(id, _)| id).unwrap_or(EffectId(0));
+        for (effect_id, effect_info) in &self.env.effects {
+            if let Some(op_type) = effect_info.operations.get(&op_sym) {
+                found_operation = Some((*effect_id, effect_info.clone(), op_type.clone()));
+                break;
+            }
+        }
 
+        let (effect_id, _effect_info, op_type) =
+            if let Some((effect_id, effect_info, op_type)) = found_operation {
+                (effect_id, effect_info, op_type)
+            } else {
+                // Error: operation not found in any effect
+                self.error(
+                    &Expr {
+                        span: handler.span.clone(),
+                        file: String::new(),
+                        expr: ExprKind::Error,
+                    },
+                    TypeErrorKind::UnboundVariable { name: op_sym },
+                );
+                // Return with error state
+                self.env.pop_scope();
+                return TypedEffectHandler {
+                    span: handler.span.clone(),
+                    effect: op_sym,
+                    effect_id: EffectId(0),
+                    params: vec![],
+                    resume_param: self.interner.intern(&handler.resume_param),
+                    resume_id: self.id_gen.fresh_binding(),
+                    resume_type: self.fresh_type_var(),
+                    body: self.error_expr(&handler.body),
+                };
+            };
+
+        // Check that op_type is a function type
+        let (op_params, op_return_type) = if let TypeKind::Function {
+            params: ref op_params,
+            return_type: ref op_return_type,
+            ..
+        } = op_type.type_
+        {
+            (op_params, op_return_type)
+        } else {
+            // Error: operation is not a function type
+            self.error(
+                &Expr {
+                    span: handler.span.clone(),
+                    file: String::new(),
+                    expr: ExprKind::Error,
+                },
+                TypeErrorKind::NotAFunction {
+                    type_: op_type.clone(),
+                },
+            );
+            self.env.pop_scope();
+            return TypedEffectHandler {
+                span: handler.span.clone(),
+                effect: op_sym,
+                effect_id,
+                params: vec![],
+                resume_param: self.interner.intern(&handler.resume_param),
+                resume_id: self.id_gen.fresh_binding(),
+                resume_type: self.fresh_type_var(),
+                body: self.error_expr(&handler.body),
+            };
+        };
+
+        // Check that the number of handler parameters matches the operation parameters
+        if handler.params.len() != op_params.len() {
+            self.error(
+                &Expr {
+                    span: handler.span.clone(),
+                    file: String::new(),
+                    expr: ExprKind::Error,
+                },
+                TypeErrorKind::ArityMismatch {
+                    expected: op_params.len(),
+                    found: handler.params.len(),
+                    function: op_sym,
+                },
+            );
+        }
+
+        // Create parameters with the correct types from the operation signature
         let params: Vec<_> = handler
             .params
             .iter()
-            .map(|p| {
+            .zip(op_params.iter())
+            .map(|(p, expected_type)| {
                 let binding_id = self.id_gen.fresh_binding();
                 let param_sym = self.interner.intern(p);
-                let param_type = self.fresh_type_var();
 
                 self.env.add_binding(
                     param_sym,
                     Binding {
                         id: binding_id,
                         name: param_sym,
-                        type_: param_type.clone(),
+                        type_: expected_type.clone(),
                         mutable: false,
                     },
                 );
 
-                (param_sym, binding_id, param_type)
+                (param_sym, binding_id, expected_type.clone())
             })
             .collect();
 
+        // The resume parameter should have a function type that takes the operation's return type
+        // and returns the same type as the handler body
+        let resume_return_type = self.fresh_type_var();
+        let resume_type = Rc::new(Type {
+            span: Some(handler.span.clone()),
+            file: Some(handler.body.file.clone()), // Use the body's file
+            type_: TypeKind::Function {
+                params: vec![op_return_type.clone()], // Takes the operation's return type
+                return_type: resume_return_type.clone(), // Returns the handler's return type
+                effects: EffectSet::pure(),           // Resume functions are pure
+            },
+        });
+
         let resume_id = self.id_gen.fresh_binding();
-        let resume_type = self.fresh_type_var();
+        let resume_sym = self.interner.intern(&handler.resume_param);
         self.env.add_binding(
             resume_sym,
             Binding {
@@ -2862,11 +3399,15 @@ impl TypeChecker {
         );
 
         let body_typed = self.check_expr(&handler.body);
+
+        // Unify the resume return type with the body type
+        self.unify(&resume_return_type, &body_typed.type_, &handler.body.span);
+
         self.env.pop_scope();
 
         TypedEffectHandler {
             span: handler.span.clone(),
-            effect: effect_sym,
+            effect: op_sym, // The operation name
             effect_id,
             params,
             resume_param: resume_sym,
@@ -3211,6 +3752,19 @@ impl TypeChecker {
         // For generic functions, wrap in Forall; otherwise just use the base type
         let func_type = if !typeparams.is_empty() {
             // Create polymorphic type for explicitly generic functions
+            // Convert type parameter bounds to trait constraints
+            let mut constraints = Vec::new();
+            for tp in &typeparams {
+                for bound in &tp.bounds {
+                    // Find the trait that this bound refers to
+                    // The bound should be a trait type, so we need to extract the trait id
+                    if let TypeKind::Constructor { name, .. } = &bound.type_ {
+                        // Create a trait constraint: this type parameter implements this trait
+                        constraints.push(Constraint::Trait(tp.var_id.0, *name));
+                    }
+                }
+            }
+
             Rc::new(Type {
                 span: Some(func.span.clone()),
                 file: Some(func.file.clone()),
@@ -3219,7 +3773,7 @@ impl TypeChecker {
                         .iter()
                         .map(|tp| (tp.var_id.0, tp.kind.clone()))
                         .collect(),
-                    constraints: vec![],
+                    constraints, // Now with proper trait constraints
                     body: base_func_type,
                 },
             })

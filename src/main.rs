@@ -3,6 +3,7 @@ use chumsky::prelude::*;
 use logos::Logos;
 use vial::ast::Interner;
 use vial::desugar::lambda::LambdaDesugarer;
+use vial::hir::from_ast::ASTToHIRConverter;
 use vial::lexer::Token;
 use vial::parser;
 use vial::typechecker::TypeChecker;
@@ -185,19 +186,25 @@ fn main() {
 
     println!("Type checking validation passed");
 
+    // Generate HIR from monomorphized AST
+    println!("Generating HIR from monomorphized AST");
+    let mut converter = ASTToHIRConverter::new();
+    let hir_functions = converter.convert_program(monomorphized_ast);
+
+    if args.contains(&"--debug".to_string()) || args.contains(&"-d".to_string()) {
+        println!("HIR Functions: {}", hir_functions.len());
+        for (i, func) in hir_functions.iter().enumerate() {
+            println!(
+                "HIR Function {}: {:#?} fn{}",
+                i, func.instructions, func.name
+            );
+        }
+    }
+
     // Output
     println!("Compilation Successful");
     println!("File: {}", filename);
 
-    if args.contains(&"--debug".to_string()) || args.contains(&"-d".to_string()) {
-        println!("Nodes: {}", monomorphized_ast.len());
-        println!("Typed AST");
-        for (i, node) in monomorphized_ast.iter().enumerate() {
-            println!("Node {}: {:#?}", i, node);
-        }
-    }
-
-    // TODO: IR
     // TODO: Optimization
     // TODO: Code generation
     // TODO: Bytecode and VM

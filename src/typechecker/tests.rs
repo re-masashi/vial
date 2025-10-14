@@ -2451,3 +2451,323 @@ fn test_struct_pattern_with_different_types() {
     let _typed = tc.check_expr(&match_expr);
     assert!(!tc.diagnostics.has_errors());
 }
+
+#[test]
+fn test_lambda_capture_single_variable() {
+    let mut tc = setup();
+
+    // Create a variable in outer scope
+    let x_binding = tc.interner.intern("x");
+    tc.env.push_scope();
+    tc.env.add_binding(
+        x_binding,
+        Binding {
+            id: BindingId(1),
+            name: x_binding,
+            type_: tc.int_type(),
+            mutable: false,
+        },
+    );
+
+    // Create lambda that captures "x": \y -> x + y
+    let lambda = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::Lambda {
+            args: vec![FnArg {
+                span: dummy_span(),
+                file: dummy_file(),
+                name: "y".to_string(),
+                type_: None,
+            }],
+            expression: Box::new(Expr {
+                span: dummy_span(),
+                file: dummy_file(),
+                expr: ExprKind::BinOp(
+                    Box::new(Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::Variable("x".to_string()),
+                    }),
+                    BinOp::Add,
+                    Box::new(Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::Variable("y".to_string()),
+                    }),
+                ),
+            }),
+        },
+    };
+
+    let typed = tc.check_expr(&lambda);
+
+    // Check that it"s a lambda with captures
+    if let TypedExprKind::Lambda { captures, .. } = &typed.expr {
+        assert_eq!(captures.len(), 1, "Expected 1 captured variable");
+        assert_eq!(tc.interner.resolve(captures[0].0), "x");
+        assert_eq!(captures[0].1, BindingId(1)); // Should be the binding ID of "x"
+    } else {
+        panic!("Expected lambda expression");
+    }
+
+    assert!(!tc.diagnostics.has_errors());
+
+    tc.env.pop_scope();
+}
+
+#[test]
+fn test_lambda_capture_multiple_variables() {
+    let mut tc = setup();
+
+    // Create variables in outer scope
+    let x_binding = tc.interner.intern("x");
+    let y_binding = tc.interner.intern("y");
+    tc.env.push_scope();
+    tc.env.add_binding(
+        x_binding,
+        Binding {
+            id: BindingId(1),
+            name: x_binding,
+            type_: tc.int_type(),
+            mutable: false,
+        },
+    );
+    tc.env.add_binding(
+        y_binding,
+        Binding {
+            id: BindingId(2),
+            name: y_binding,
+            type_: tc.int_type(),
+            mutable: false,
+        },
+    );
+
+    // Create lambda that captures both "x" and "y": \z -> x + y + z
+    let lambda = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::Lambda {
+            args: vec![FnArg {
+                span: dummy_span(),
+                file: dummy_file(),
+                name: "z".to_string(),
+                type_: None,
+            }],
+            expression: Box::new(Expr {
+                span: dummy_span(),
+                file: dummy_file(),
+                expr: ExprKind::BinOp(
+                    Box::new(Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::BinOp(
+                            Box::new(Expr {
+                                span: dummy_span(),
+                                file: dummy_file(),
+                                expr: ExprKind::Variable("x".to_string()),
+                            }),
+                            BinOp::Add,
+                            Box::new(Expr {
+                                span: dummy_span(),
+                                file: dummy_file(),
+                                expr: ExprKind::Variable("y".to_string()),
+                            }),
+                        ),
+                    }),
+                    BinOp::Add,
+                    Box::new(Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::Variable("z".to_string()),
+                    }),
+                ),
+            }),
+        },
+    };
+
+    let typed = tc.check_expr(&lambda);
+
+    // Check that it"s a lambda with captures
+    if let TypedExprKind::Lambda { captures, .. } = &typed.expr {
+        assert_eq!(captures.len(), 2, "Expected 2 captured variables");
+
+        // Check that both x and y are captured
+        let captured_names: Vec<&str> = captures
+            .iter()
+            .map(|(name, _, _)| tc.interner.resolve(*name))
+            .collect();
+        assert!(captured_names.contains(&"x"));
+        assert!(captured_names.contains(&"y"));
+    } else {
+        panic!("Expected lambda expression");
+    }
+
+    assert!(!tc.diagnostics.has_errors());
+
+    tc.env.pop_scope();
+}
+
+#[test]
+fn test_lambda_no_capture() {
+    let mut tc = setup();
+
+    // Create a lambda with no outer scope variables: \x y -> x + y
+    let lambda = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::Lambda {
+            args: vec![
+                FnArg {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    name: "x".to_string(),
+                    type_: None,
+                },
+                FnArg {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    name: "y".to_string(),
+                    type_: None,
+                },
+            ],
+            expression: Box::new(Expr {
+                span: dummy_span(),
+                file: dummy_file(),
+                expr: ExprKind::BinOp(
+                    Box::new(Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::Variable("x".to_string()),
+                    }),
+                    BinOp::Add,
+                    Box::new(Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::Variable("y".to_string()),
+                    }),
+                ),
+            }),
+        },
+    };
+
+    let typed = tc.check_expr(&lambda);
+
+    // Check that it"s a lambda with no captures
+    if let TypedExprKind::Lambda { captures, .. } = &typed.expr {
+        assert_eq!(captures.len(), 0, "Expected no captured variables");
+    } else {
+        panic!("Expected lambda expression");
+    }
+
+    assert!(!tc.diagnostics.has_errors());
+}
+
+#[test]
+fn test_nested_lambda_captures() {
+    let mut tc = setup();
+
+    // Create an outer variable
+    let outer_binding = tc.interner.intern("outer_var");
+    tc.env.push_scope();
+    let outer_binding_id = tc.id_gen.fresh_binding();
+    tc.env.add_binding(
+        outer_binding,
+        Binding {
+            id: outer_binding_id,
+            name: outer_binding,
+            type_: tc.int_type(),
+            mutable: false,
+        },
+    );
+
+    // Create nested lambda: \x -> (\y -> outer_var + x + y)
+    let nested_lambda = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::Lambda {
+            args: vec![FnArg {
+                span: dummy_span(),
+                file: dummy_file(),
+                name: "x".to_string(),
+                type_: None,
+            }],
+            expression: Box::new(Expr {
+                span: dummy_span(),
+                file: dummy_file(),
+                expr: ExprKind::Lambda {
+                    args: vec![FnArg {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        name: "y".to_string(),
+                        type_: None,
+                    }],
+                    expression: Box::new(Expr {
+                        span: dummy_span(),
+                        file: dummy_file(),
+                        expr: ExprKind::BinOp(
+                            Box::new(Expr {
+                                span: dummy_span(),
+                                file: dummy_file(),
+                                expr: ExprKind::BinOp(
+                                    Box::new(Expr {
+                                        span: dummy_span(),
+                                        file: dummy_file(),
+                                        expr: ExprKind::Variable("outer_var".to_string()),
+                                    }),
+                                    BinOp::Add,
+                                    Box::new(Expr {
+                                        span: dummy_span(),
+                                        file: dummy_file(),
+                                        expr: ExprKind::Variable("x".to_string()),
+                                    }),
+                                ),
+                            }),
+                            BinOp::Add,
+                            Box::new(Expr {
+                                span: dummy_span(),
+                                file: dummy_file(),
+                                expr: ExprKind::Variable("y".to_string()),
+                            }),
+                        ),
+                    }),
+                },
+            }),
+        },
+    };
+
+    let typed = tc.check_expr(&nested_lambda);
+
+    // The outer lambda should capture "outer_var" from the environment
+    if let TypedExprKind::Lambda { captures, body, .. } = &typed.expr {
+        assert_eq!(captures.len(), 1, "Outer lambda should capture 1 variable");
+        assert_eq!(tc.interner.resolve(captures[0].0), "outer_var");
+
+        // The inner lambda (in the body) should capture both "outer_var" and "x"
+        if let TypedExprKind::Lambda {
+            captures: inner_captures,
+            ..
+        } = &body.expr
+        {
+            assert_eq!(
+                inner_captures.len(),
+                2,
+                "Inner lambda should capture 2 variables"
+            );
+            let inner_names: Vec<&str> = inner_captures
+                .iter()
+                .map(|(name, _, _)| tc.interner.resolve(*name))
+                .collect();
+            assert!(inner_names.contains(&"outer_var"));
+            assert!(inner_names.contains(&"x"));
+        } else {
+            panic!("Expected inner lambda");
+        }
+    } else {
+        panic!("Expected outer lambda expression");
+    }
+
+    assert!(!tc.diagnostics.has_errors());
+
+    tc.env.pop_scope();
+}

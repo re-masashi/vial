@@ -6,6 +6,7 @@
 pub mod builder;
 pub mod cfg;
 pub mod display;
+pub mod from_ast;
 pub mod function;
 pub mod instruction;
 pub mod types;
