@@ -1392,11 +1392,11 @@ impl TypeChecker {
                 // are already parameters of the current lambda
                 for capture in nested_captures {
                     // Skip captures that are parameters of the current lambda
-                    if !lambda_arg_binding_ids.contains(&capture.1)
-                        && !visited.contains(&capture.1) {
-                            captures.push(capture.clone());
-                            visited.insert(capture.1);
-                        }
+                    if !lambda_arg_binding_ids.contains(&capture.1) && !visited.contains(&capture.1)
+                    {
+                        captures.push(capture.clone());
+                        visited.insert(capture.1);
+                    }
                 }
             }
             // For other expressions, recursively collect captures from sub-expressions

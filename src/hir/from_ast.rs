@@ -223,13 +223,17 @@ impl ASTToHIRConverter {
                     }
                 }
             }
-            TypedExprKind::Assign { l_val: _, r_val, op } => {
+            TypedExprKind::Assign {
+                l_val: _,
+                r_val,
+                op,
+            } => {
                 // Handle assignment operations
                 // For now, return the right value as a placeholder
                 // In a real implementation, you'd need to handle assignment properly
                 // by updating the left-hand side and returning the assigned value
                 let right_val = self.convert_expr(builder, r_val);
-                
+
                 match op {
                     crate::ast::AssignOp::Assign => right_val,
                     crate::ast::AssignOp::AddAssign => right_val,
@@ -240,10 +244,7 @@ impl ASTToHIRConverter {
                 }
             }
             TypedExprKind::Let {
-                
-                binding_id,
-                value,
-                ..
+                binding_id, value, ..
             } => {
                 let value_id = self.convert_expr(builder, value);
                 // Store the binding in our map
@@ -260,7 +261,7 @@ impl ASTToHIRConverter {
                 // For now, create an array allocation and store elements
                 // In a real implementation, we'd need to allocate memory for the array
                 // and initialize each element
-                
+
                 if element_values.is_empty() {
                     // For empty arrays, return a default value
                     builder.const_int(0, self.convert_type(&expr.type_))
@@ -525,9 +526,7 @@ impl ASTToHIRConverter {
                 // In a real implementation, while loops might return the last value or unit
                 builder.const_int(0, self.convert_type(&expr.type_))
             }
-            TypedExprKind::IfLet {
-                expr, then,  ..
-            } => {
+            TypedExprKind::IfLet { expr, then, .. } => {
                 // Handle if-let expressions - for now, a simplified approach
                 let _expr_val = self.convert_expr(builder, expr);
 
@@ -543,7 +542,9 @@ impl ASTToHIRConverter {
             }
             TypedExprKind::Return(return_expr) => {
                 // This should terminate the current function
-                let return_val = return_expr.as_ref().map(|expr| self.convert_expr(builder, expr));
+                let return_val = return_expr
+                    .as_ref()
+                    .map(|expr| self.convert_expr(builder, expr));
 
                 // Create and return the return terminator
                 return_val.unwrap_or_else(|| builder.const_int(0, self.convert_type(&expr.type_)))
@@ -2977,7 +2978,11 @@ mod tests {
         let enum_name = interner.intern("MultiArgEnum");
         let variant_name = interner.intern("MultiArgVariant");
 
-        let args = vec![create_int_expr(10), create_int_expr(20), create_int_expr(30)];
+        let args = vec![
+            create_int_expr(10),
+            create_int_expr(20),
+            create_int_expr(30),
+        ];
         let enum_expr = TypedExpr {
             span: 0..1,
             file: "test".to_string(),
@@ -3053,7 +3058,11 @@ mod tests {
         let interner = &mut Interner::new();
         let effect_name = interner.intern("MultiArgEffect");
 
-        let args = vec![create_int_expr(10), create_int_expr(20), create_int_expr(30)];
+        let args = vec![
+            create_int_expr(10),
+            create_int_expr(20),
+            create_int_expr(30),
+        ];
         let perform_expr = TypedExpr {
             span: 0..1,
             file: "test".to_string(),
@@ -3142,7 +3151,7 @@ mod tests {
         let var_name2 = interner.intern("y");
 
         let scrutinee = create_int_expr(42);
-        
+
         // First arm
         let arm1_pattern = TypedPattern {
             span: 0..1,
