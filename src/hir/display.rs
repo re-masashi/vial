@@ -274,6 +274,9 @@ fn opcode_to_llvm(opcode: &Opcode) -> String {
         Opcode::ExtractValue => "extractvalue".to_string(),
         Opcode::InsertValue => "insertvalue".to_string(),
 
+        // Effect operations
+        Opcode::PerformEffect => "perform_effect".to_string(),
+
         // Other operations
         Opcode::Nop => "nop".to_string(),
         Opcode::Unreachable => "unreachable".to_string(),

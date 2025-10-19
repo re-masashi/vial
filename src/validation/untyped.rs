@@ -401,7 +401,119 @@ impl UntypedValidator {
                 },
             },
 
-            // TODO: expand other expression types
+            // Expand other expression types
+            ExprKind::BinOp(left, op, right) => {
+                let expanded_left = self.expand_expr(*left);
+                let expanded_right = self.expand_expr(*right);
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::BinOp(
+                        Box::new(expanded_left),
+                        op.clone(),
+                        Box::new(expanded_right),
+                    ),
+                }
+            }
+            ExprKind::UnOp(op, operand) => {
+                let expanded_operand = self.expand_expr(*operand);
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::UnOp(op.clone(), Box::new(expanded_operand)),
+                }
+            }
+            ExprKind::Call(func, args) => {
+                let expanded_func = self.expand_expr(*func);
+                let expanded_args: Vec<_> =
+                    args.into_iter().map(|arg| self.expand_expr(arg)).collect();
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::Call(Box::new(expanded_func), expanded_args),
+                }
+            }
+            ExprKind::FieldAccess(target, field) => {
+                let expanded_target = self.expand_expr(*target);
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::FieldAccess(Box::new(expanded_target), field),
+                }
+            }
+            ExprKind::Index(target, index) => {
+                let expanded_target = self.expand_expr(*target);
+                let expanded_index = self.expand_expr(*index);
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::Index(Box::new(expanded_target), Box::new(expanded_index)),
+                }
+            }
+            ExprKind::Array(elements) => {
+                let expanded_elements: Vec<_> = elements
+                    .into_iter()
+                    .map(|elem| self.expand_expr(elem))
+                    .collect();
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::Array(expanded_elements),
+                }
+            }
+            ExprKind::Tuple(elements) => {
+                let expanded_elements: Vec<_> = elements
+                    .into_iter()
+                    .map(|elem| self.expand_expr(elem))
+                    .collect();
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::Tuple(expanded_elements),
+                }
+            }
+            ExprKind::Map(entries) => {
+                let expanded_entries: Vec<_> = entries
+                    .into_iter()
+                    .map(|(k, v)| (self.expand_expr(k), self.expand_expr(v)))
+                    .collect();
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::Map(expanded_entries),
+                }
+            }
+            ExprKind::EnumConstruct {
+                name,
+                variant,
+                args,
+            } => {
+                let expanded_args: Vec<_> =
+                    args.into_iter().map(|arg| self.expand_expr(arg)).collect();
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::EnumConstruct {
+                        name,
+                        variant,
+                        args: expanded_args,
+                    },
+                }
+            }
+            ExprKind::StructConstruct { name, fields } => {
+                let expanded_fields: Vec<_> = fields
+                    .into_iter()
+                    .map(|(field_name, field_expr)| (field_name, self.expand_expr(field_expr)))
+                    .collect();
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::StructConstruct {
+                        name,
+                        fields: expanded_fields,
+                    },
+                }
+            }
             _ => expr,
         }
     }
@@ -581,7 +693,193 @@ impl UntypedValidator {
                 }
             }
 
-            // TODO: other variants
+            ExprKind::Assign { l_val, r_val, op } => {
+                let validated_l_val = self.validate_expr(*l_val);
+                let validated_r_val = self.validate_expr(*r_val);
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::Assign {
+                        l_val: Box::new(validated_l_val),
+                        r_val: Box::new(validated_r_val),
+                        op: op.clone(),
+                    },
+                }
+            }
+            ExprKind::Array(elements) => {
+                let validated_elements: Vec<_> = elements
+                    .into_iter()
+                    .map(|e| self.validate_expr(e))
+                    .collect();
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::Array(validated_elements),
+                }
+            }
+            ExprKind::Tuple(elements) => {
+                let validated_elements: Vec<_> = elements
+                    .into_iter()
+                    .map(|e| self.validate_expr(e))
+                    .collect();
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::Tuple(validated_elements),
+                }
+            }
+            ExprKind::Index(target, index) => {
+                let validated_target = self.validate_expr(*target);
+                let validated_index = self.validate_expr(*index);
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::Index(Box::new(validated_target), Box::new(validated_index)),
+                }
+            }
+            ExprKind::FieldAccess(target, field) => {
+                let validated_target = self.validate_expr(*target);
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::FieldAccess(Box::new(validated_target), field.clone()),
+                }
+            }
+            ExprKind::EnumConstruct {
+                name,
+                variant,
+                args,
+            } => {
+                let validated_args: Vec<_> =
+                    args.into_iter().map(|a| self.validate_expr(a)).collect();
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::EnumConstruct {
+                        name: name.clone(),
+                        variant: variant.clone(),
+                        args: validated_args,
+                    },
+                }
+            }
+            ExprKind::StructConstruct { name, fields } => {
+                let validated_fields: Vec<_> = fields
+                    .into_iter()
+                    .map(|(field_name, field_expr)| {
+                        (field_name.clone(), self.validate_expr(field_expr))
+                    })
+                    .collect();
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::StructConstruct {
+                        name: name.clone(),
+                        fields: validated_fields,
+                    },
+                }
+            }
+            ExprKind::Cast {
+                expr: inner,
+                target_type,
+            } => {
+                let validated_inner = self.validate_expr(*inner);
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::Cast {
+                        expr: Box::new(validated_inner),
+                        target_type: target_type.clone(),
+                    },
+                }
+            }
+            ExprKind::With { context, var, body } => {
+                let validated_context = self.validate_expr(*context);
+                let validated_body = self.validate_expr(*body);
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::With {
+                        context: Box::new(validated_context),
+                        var: var.clone(),
+                        body: Box::new(validated_body),
+                    },
+                }
+            }
+            ExprKind::Match(scrutinee, arms) => {
+                let validated_scrutinee = self.validate_expr(*scrutinee);
+                let validated_arms: Vec<_> = arms
+                    .into_iter()
+                    .map(|arm| {
+                        let pattern = arm.pattern; // Patterns are validated separately
+                        let guard = arm.guard.map(|g| self.validate_expr(g));
+                        let body = self.validate_expr(*arm.body);
+                        MatchArm {
+                            pattern,
+                            guard,
+                            body: Box::new(body),
+                            span: arm.span,
+                        }
+                    })
+                    .collect();
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::Match(Box::new(validated_scrutinee), validated_arms),
+                }
+            }
+            ExprKind::Perform { effect, args } => {
+                let validated_args: Vec<_> =
+                    args.into_iter().map(|a| self.validate_expr(a)).collect();
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::Perform {
+                        effect: effect.clone(),
+                        args: validated_args,
+                    },
+                }
+            }
+            ExprKind::Handle { body, handlers } => {
+                let validated_body = self.validate_expr(*body);
+                let validated_handlers: Vec<_> = handlers
+                    .into_iter()
+                    .map(|handler| {
+                        let body = self.validate_expr(handler.body);
+                        EffectHandler {
+                            effect: handler.effect,
+                            params: handler.params,
+                            resume_param: handler.resume_param,
+                            body,
+                            span: handler.span,
+                        }
+                    })
+                    .collect();
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::Handle {
+                        body: Box::new(validated_body),
+                        handlers: validated_handlers,
+                    },
+                }
+            }
+            ExprKind::OptionalChain(target, field) => {
+                let validated_target = self.validate_expr(*target);
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::OptionalChain(Box::new(validated_target), field.clone()),
+                }
+            }
+            ExprKind::MacroCall(name, args, delimiter) => {
+                let validated_args: Vec<_> =
+                    args.into_iter().map(|a| self.validate_expr(a)).collect();
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::MacroCall(name.clone(), validated_args, delimiter.clone()),
+                }
+            }
             _ => expr,
         }
     }

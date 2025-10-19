@@ -57,6 +57,9 @@ pub enum Opcode {
     Return,
     CallIndirect,
 
+    // Effect operations
+    PerformEffect, // Invoke an effect operation
+
     // Aggregate operations
     ExtractValue, // Extract from struct/tuple
     InsertValue,  // Insert into struct/tuple

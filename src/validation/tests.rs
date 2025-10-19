@@ -744,7 +744,7 @@ fn test_shadowing_in_nested_scopes_allowed() {
 fn test_circular_import_detection_three_modules() {
     // Create test files
     let test_dir = PathBuf::from("test_circular");
-    let _ = fs::create_dir_all(&test_dir.join("src"));
+    let _ = fs::create_dir_all(test_dir.join("src"));
 
     // a.ni imports b.ni
     // b.ni imports c.ni

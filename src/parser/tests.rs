@@ -55,6 +55,7 @@ fn parse_toplevel(source: &str) -> Vec<ASTNode> {
 }
 
 #[test]
+#[allow(clippy::approx_constant)]
 fn test_literals() {
     let expr = parse_expr("42");
     assert!(matches!(expr.expr, ExprKind::Int(42)));

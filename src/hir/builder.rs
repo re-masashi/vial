@@ -95,6 +95,26 @@ impl Builder {
         value_id
     }
 
+    /// Create a constant float value
+    pub fn const_float(&mut self, _value: f64, _ty: TypeId) -> ValueId {
+        let value_id = ValueId(self.next_value_id);
+        self.next_value_id += 1;
+
+        // In a real implementation, we'd store the float value in the function
+        // For now, we'll just return a value ID
+        value_id
+    }
+
+    /// Create a constant string value
+    pub fn const_string(&mut self, _value: &str, _ty: TypeId) -> ValueId {
+        let value_id = ValueId(self.next_value_id);
+        self.next_value_id += 1;
+
+        // In a real implementation, we'd store the string value in the function
+        // For now, we'll just return a value ID
+        value_id
+    }
+
     /// Create a binary operation instruction
     pub fn binary_op(
         &mut self,
@@ -211,7 +231,7 @@ impl Builder {
         let inst = Instruction {
             opcode: Opcode::Store,
             args: vec![ptr, value],
-            ty: TypeId(0), // Store instructions don't return a value, but we need a placeholder
+            ty: TypeId(0), // Store instructions don't return a meaningful value, but we need a placeholder
             is_pure: false, // Stores have side effects
             allocation_info: None,
         };
@@ -237,6 +257,35 @@ impl Builder {
             args,
             ty: return_ty,
             is_pure: false, // Function calls can have side effects
+            allocation_info: None,
+        };
+
+        let inst_idx = self.instructions.len();
+        self.instructions.push(inst);
+
+        // Add the instruction to the current block
+        if let Some(block_id) = self.current_block
+            && let Some(ref mut func) = self.current_function
+            && let Some(block) = func.basic_blocks.iter_mut().find(|b| b.id == block_id)
+        {
+            block.instructions.push(inst_idx);
+        }
+
+        ValueId(inst_idx)
+    }
+
+    /// Create an effect invocation instruction
+    pub fn invoke_effect(
+        &mut self,
+        effect_id: ValueId,
+        args: Vec<ValueId>,
+        return_ty: TypeId,
+    ) -> ValueId {
+        let inst = Instruction {
+            opcode: Opcode::PerformEffect,
+            args: std::iter::once(effect_id).chain(args).collect(), // Effect ID first, then arguments
+            ty: return_ty,
+            is_pure: false, // Effects have side effects
             allocation_info: None,
         };
 
@@ -283,6 +332,191 @@ impl Builder {
         ValueId(inst_idx)
     }
 
+    /// Create an array allocation instruction
+    pub fn alloc_array(&mut self, element_type: TypeId, size: ValueId, is_heap: bool) -> ValueId {
+        let opcode = if is_heap {
+            Opcode::AllocaHeap
+        } else {
+            Opcode::Alloca
+        };
+        let inst = Instruction {
+            opcode,
+            args: vec![size], // Size is passed as an argument
+            ty: element_type, // Use the provided element_type for the instruction type
+            is_pure: false,   // Allocations have side effects
+            allocation_info: Some(AllocationInfo {
+                preference: if is_heap {
+                    AllocationPreference::Heap
+                } else {
+                    AllocationPreference::Stack
+                },
+                alignment: None,
+                is_pinned: false,
+            }),
+        };
+
+        let inst_idx = self.instructions.len();
+        self.instructions.push(inst);
+
+        // Add the instruction to the current block
+        if let Some(block_id) = self.current_block
+            && let Some(ref mut func) = self.current_function
+            && let Some(block) = func.basic_blocks.iter_mut().find(|b| b.id == block_id)
+        {
+            block.instructions.push(inst_idx);
+        }
+
+        ValueId(inst_idx)
+    }
+
+    /// Create a tuple allocation instruction
+    pub fn alloc_tuple(&mut self, _element_types: &[TypeId], is_heap: bool) -> ValueId {
+        let opcode = if is_heap {
+            Opcode::AllocaHeap
+        } else {
+            Opcode::Alloca
+        };
+        let inst = Instruction {
+            opcode,
+            args: vec![],   // Tuples don't need size args like arrays
+            ty: TypeId(0), // Should be tuple type in real implementation - need to create tuple type from element_types
+            is_pure: false, // Allocations have side effects
+            allocation_info: Some(AllocationInfo {
+                preference: if is_heap {
+                    AllocationPreference::Heap
+                } else {
+                    AllocationPreference::Stack
+                },
+                alignment: None,
+                is_pinned: false,
+            }),
+        };
+
+        let inst_idx = self.instructions.len();
+        self.instructions.push(inst);
+
+        // Add the instruction to the current block
+        if let Some(block_id) = self.current_block
+            && let Some(ref mut func) = self.current_function
+            && let Some(block) = func.basic_blocks.iter_mut().find(|b| b.id == block_id)
+        {
+            block.instructions.push(inst_idx);
+        }
+
+        ValueId(inst_idx)
+    }
+
+    /// Create a map allocation instruction
+    pub fn alloc_map(&mut self, _key_type: TypeId, _value_type: TypeId, is_heap: bool) -> ValueId {
+        let opcode = if is_heap {
+            Opcode::AllocaHeap
+        } else {
+            Opcode::Alloca
+        };
+        let inst = Instruction {
+            opcode,
+            args: vec![],   // Maps don't need initial size in allocation
+            ty: TypeId(0),  // Should be map type in real implementation
+            is_pure: false, // Allocations have side effects
+            allocation_info: Some(AllocationInfo {
+                preference: if is_heap {
+                    AllocationPreference::Heap
+                } else {
+                    AllocationPreference::Stack
+                },
+                alignment: None,
+                is_pinned: false,
+            }),
+        };
+
+        let inst_idx = self.instructions.len();
+        self.instructions.push(inst);
+
+        // Add the instruction to the current block
+        if let Some(block_id) = self.current_block
+            && let Some(ref mut func) = self.current_function
+            && let Some(block) = func.basic_blocks.iter_mut().find(|b| b.id == block_id)
+        {
+            block.instructions.push(inst_idx);
+        }
+
+        ValueId(inst_idx)
+    }
+
+    /// Create an enum allocation instruction
+    pub fn alloc_enum(&mut self, _tag_type: TypeId, _data_type: TypeId, is_heap: bool) -> ValueId {
+        let opcode = if is_heap {
+            Opcode::AllocaHeap
+        } else {
+            Opcode::Alloca
+        };
+        let inst = Instruction {
+            opcode,
+            args: vec![],   // Enums don't need initial args
+            ty: TypeId(0),  // Should be enum type in real implementation
+            is_pure: false, // Allocations have side effects
+            allocation_info: Some(AllocationInfo {
+                preference: if is_heap {
+                    AllocationPreference::Heap
+                } else {
+                    AllocationPreference::Stack
+                },
+                alignment: None,
+                is_pinned: false,
+            }),
+        };
+
+        let inst_idx = self.instructions.len();
+        self.instructions.push(inst);
+
+        // Add the instruction to the current block
+        if let Some(block_id) = self.current_block
+            && let Some(ref mut func) = self.current_function
+            && let Some(block) = func.basic_blocks.iter_mut().find(|b| b.id == block_id)
+        {
+            block.instructions.push(inst_idx);
+        }
+
+        ValueId(inst_idx)
+    }
+
+    /// Create a struct allocation instruction
+    pub fn alloc_struct(&mut self, _field_types: &[TypeId], is_heap: bool) -> ValueId {
+        let opcode = if is_heap {
+            Opcode::AllocaHeap
+        } else {
+            Opcode::Alloca
+        };
+        let inst = Instruction {
+            opcode,
+            args: vec![],   // Structs don't need initial args
+            ty: TypeId(0),  // Should be struct type in real implementation
+            is_pure: false, // Allocations have side effects
+            allocation_info: Some(AllocationInfo {
+                preference: if is_heap {
+                    AllocationPreference::Heap
+                } else {
+                    AllocationPreference::Stack
+                },
+                alignment: None,
+                is_pinned: false,
+            }),
+        };
+
+        let inst_idx = self.instructions.len();
+        self.instructions.push(inst);
+
+        // Add the instruction to the current block
+        if let Some(block_id) = self.current_block
+            && let Some(ref mut func) = self.current_function
+            && let Some(block) = func.basic_blocks.iter_mut().find(|b| b.id == block_id)
+        {
+            block.instructions.push(inst_idx);
+        }
+
+        ValueId(inst_idx)
+    }
+
     /// Add a phi node to the current block
     pub fn add_phi_node(
         &mut self,
@@ -300,6 +534,11 @@ impl Builder {
                 incomings,
             });
         }
+    }
+
+    /// Get the next value ID without incrementing it
+    pub fn get_next_value_id(&self) -> usize {
+        self.next_value_id
     }
 
     /// Create a return instruction

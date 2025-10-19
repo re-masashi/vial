@@ -962,20 +962,86 @@ impl TypeChecker {
 
     pub fn instantiate_generic_call(
         &mut self,
-        _func_expr: &TypedExpr,
-        _type_args: Vec<Rc<Type>>,
+        func_expr: &TypedExpr,
+        type_args: Vec<Rc<Type>>,
     ) -> TypedExpr {
-        todo!()
-        // // Extract function being called
-        // if let TypedExprKind::Variable { name, binding_id } = &func_expr.expr {
-        //     // Lookup function definition
-        //     if let Some(func_info) = self.env.functions.get(binding_id) {
-        //         // TODO: get actual function definition and instantiate
-        //         // For now, just return the call with type args tracked
-        //     }
-        // }
+        // Extract function being called
+        if let TypedExprKind::Variable { name, binding_id } = &func_expr.expr {
+            // Lookup function definition
+            if let Some(func_info) = self.env.functions.get(&FunctionId(binding_id.0)) {
+                // For a generic function, we need to instantiate it with the provided type arguments
+                // First, check if the function is polymorphic (has type variables)
+                let instantiated_type = match &func_info.type_.type_ {
+                    TypeKind::Forall { vars, body, .. } => {
+                        // Create substitution mapping each quantified variable to the corresponding type arg
+                        if vars.len() != type_args.len() {
+                            // Error: wrong number of type arguments
+                            self.diagnostics.add_type_error(TypeError {
+                                span: func_expr.span.clone(),
+                                file: func_expr.file.clone(),
+                                kind: TypeErrorKind::ArityMismatch {
+                                    expected: vars.len(),
+                                    found: type_args.len(),
+                                    function: *name,
+                                },
+                            });
+                            return self.error_expr(&Expr {
+                                span: func_expr.span.clone(),
+                                file: func_expr.file.clone(),
+                                expr: ExprKind::Error,
+                            });
+                        }
 
-        // func_expr.clone()
+                        // Create substitution from type parameters to type arguments
+                        let mut subst = Substitution::default();
+                        for ((var_id, _), arg_type) in vars.iter().zip(type_args.iter()) {
+                            subst.bind(TypeId(*var_id), arg_type.clone());
+                        }
+
+                        // Apply substitution to the function body
+                        subst.apply(body)
+                    }
+                    _ => {
+                        // Not a polymorphic function, so type args should not be provided
+                        if !type_args.is_empty() {
+                            self.diagnostics.add_type_error(TypeError {
+                                span: func_expr.span.clone(),
+                                file: func_expr.file.clone(),
+                                kind: TypeErrorKind::ArityMismatch {
+                                    expected: 0,
+                                    found: type_args.len(),
+                                    function: *name,
+                                },
+                            });
+                        }
+                        func_info.type_.clone()
+                    }
+                };
+
+                // Return a copy of the function expression with the instantiated type
+                TypedExpr {
+                    span: func_expr.span.clone(),
+                    file: func_expr.file.clone(),
+                    expr: func_expr.expr.clone(),
+                    type_: instantiated_type,
+                }
+            } else {
+                // Function not found in environment
+                self.diagnostics.add_type_error(TypeError {
+                    span: func_expr.span.clone(),
+                    file: func_expr.file.clone(),
+                    kind: TypeErrorKind::UnboundVariable { name: *name },
+                });
+                self.error_expr(&Expr {
+                    span: func_expr.span.clone(),
+                    file: func_expr.file.clone(),
+                    expr: ExprKind::Error,
+                })
+            }
+        } else {
+            // Not a variable reference, so can't be a generic function call
+            func_expr.clone()
+        }
     }
 
     fn check_node(&mut self, node: ASTNode) -> TypedASTNode {
@@ -2949,11 +3015,48 @@ impl TypeChecker {
                 }
             }
 
-            ExprKind::Import(_) => {
-                todo!()
+            ExprKind::Import(import) => {
+                // Import expressions are handled during earlier phases (parsing/resolution)
+                // For type checking, we just need to create a typed import expression
+                TypedExpr {
+                    span: expr.span.clone(),
+                    file: expr.file.clone(),
+                    expr: TypedExprKind::Import(TypedImport {
+                        span: import.span.clone(),
+                        file: import.file.clone(),
+                        path: import
+                            .path
+                            .iter()
+                            .map(|s| self.interner.intern(s))
+                            .collect(),
+                        items: import
+                            .items
+                            .iter()
+                            .map(|(name, alias)| {
+                                // In the typed version, we convert string names to symbols
+                                (
+                                    self.interner.intern(name),
+                                    alias.as_ref().map(|a| self.interner.intern(a)),
+                                    TypeId(0), // Placeholder, would be filled during type resolution
+                                    self.fresh_type_var(),
+                                ) // Placeholder type
+                            })
+                            .collect(),
+                        alias: import.alias.as_ref().map(|a| self.interner.intern(a)),
+                    }),
+                    type_: self.unit_type(), // Import expressions have unit type
+                }
             }
 
-            _ => todo!("implement other expressions"),
+            ExprKind::Error => {
+                // Error expressions should not normally reach type checking
+                // but if they do, return an error type
+                self.error_expr(&Expr {
+                    span: expr.span.clone(),
+                    file: expr.file.clone(),
+                    expr: ExprKind::Error,
+                })
+            }
         }
     }
 

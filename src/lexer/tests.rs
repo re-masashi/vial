@@ -28,8 +28,9 @@ fn test_keywords() {
 }
 
 #[test]
+#[allow(clippy::approx_constant)]
 fn test_literals() {
-    let tokens = lex("42 3.14 true false \"hello\" r#\"raw\"");
+    let tokens = lex("42 2.71 true false \"hello\" r#\"raw\"");
     assert_eq!(
         tokens,
         vec![
@@ -105,6 +106,7 @@ fn test_delimiters() {
 }
 
 #[test]
+#[allow(clippy::approx_constant)]
 fn test_numbers_with_underscores() {
     let tokens = lex("1_000_000 3.141_592 1_234.567_89");
     assert_eq!(
@@ -154,6 +156,7 @@ fn test_macro_invocation() {
 }
 
 #[test]
+#[allow(clippy::approx_constant)]
 fn test_token_display() {
     // Test literals
     assert_eq!(format!("{}", Token::Bool(true)), "true");

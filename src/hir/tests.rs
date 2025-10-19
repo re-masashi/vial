@@ -97,7 +97,6 @@ fn test_dominator_tree() {
     let _dom_tree = DominatorTree::new(&cfg);
 
     // For an empty function, the dominator tree should be valid
-    assert!(true); // Basic test to ensure no panics
 }
 
 #[test]
@@ -355,7 +354,6 @@ fn test_ssa_builder_with_phi_nodes() {
     let _ret = builder.ret(Some(phi_result));
 
     // Test that the builder can create SSA form with phi nodes
-    assert!(true); // Basic test to ensure no panics during construction
 }
 
 #[test]
