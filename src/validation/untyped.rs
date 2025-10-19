@@ -675,7 +675,7 @@ impl UntypedValidator {
             }
 
             ExprKind::Import(import) => {
-                // import validation is handled by ModuleResolver, so nothing to do here FOR NOW
+                // Import validation is handled by ModuleResolver during import resolution
                 Expr {
                     span: expr.span,
                     file: expr.file,

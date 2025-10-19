@@ -20,7 +20,7 @@ impl<'a> fmt::Display for HirDisplay<'a> {
             write!(
                 f,
                 "{} ",
-                type_to_llvm(type_context, self.function.signature.return_type)
+                type_to_ir(type_context, self.function.signature.return_type)
             )?;
         } else {
             write!(f, "<?> ")?;
@@ -37,7 +37,7 @@ impl<'a> fmt::Display for HirDisplay<'a> {
             .enumerate()
             .map(|(i, param)| {
                 let type_str = if let Some(type_context) = self.type_context {
-                    type_to_llvm(type_context, param.ty)
+                    type_to_ir(type_context, param.ty)
                 } else {
                     String::from("<?>")
                 };
@@ -60,7 +60,7 @@ impl<'a> fmt::Display for HirDisplay<'a> {
                 for phi_node in &block.phi_nodes {
                     write!(f, "  {} = phi ", value_label(phi_node.result))?;
                     if let Some(type_context) = self.type_context {
-                        write!(f, "{}", type_to_llvm(type_context, phi_node.ty))?;
+                        write!(f, "{}", type_to_ir(type_context, phi_node.ty))?;
                     } else {
                         write!(f, "<?>")?;
                     }
@@ -113,11 +113,11 @@ fn write_instruction(
     type_context: Option<&TypeContext>,
 ) -> fmt::Result {
     // Write the opcode
-    write!(f, "{} ", opcode_to_llvm(&instruction.opcode))?;
+    write!(f, "{} ", opcode_to_ir(&instruction.opcode))?;
 
     // Write the type if available
     if let Some(type_context) = type_context {
-        write!(f, "{} ", type_to_llvm(type_context, instruction.ty))?;
+        write!(f, "{} ", type_to_ir(type_context, instruction.ty))?;
     } else {
         write!(f, "<?> ")?;
     }
@@ -226,7 +226,7 @@ fn write_terminator(
 }
 
 /// Convert opcode to LLVM-like string
-fn opcode_to_llvm(opcode: &Opcode) -> String {
+fn opcode_to_ir(opcode: &Opcode) -> String {
     match opcode {
         // Binary operations
         Opcode::Add => "add".to_string(),
@@ -234,6 +234,7 @@ fn opcode_to_llvm(opcode: &Opcode) -> String {
         Opcode::Mul => "mul".to_string(),
         Opcode::Div => "sdiv".to_string(), // signed division
         Opcode::Rem => "srem".to_string(), // signed remainder
+        Opcode::Pow => "pow".to_string(),  // signed remainder
         Opcode::BitAnd => "and".to_string(),
         Opcode::BitOr => "or".to_string(),
         Opcode::BitXor => "xor".to_string(),
@@ -284,36 +285,36 @@ fn opcode_to_llvm(opcode: &Opcode) -> String {
 }
 
 /// Convert type to LLVM-like string representation
-fn type_to_llvm(type_context: &TypeContext, type_id: TypeId) -> String {
+fn type_to_ir(type_context: &TypeContext, type_id: TypeId) -> String {
     match type_context.get(type_id) {
-        Some(Type::Int(int_type)) => int_type_to_llvm(*int_type).to_string(),
-        Some(Type::Float(float_type)) => float_type_to_llvm(*float_type).to_string(),
+        Some(Type::Int(int_type)) => int_type_to_ir(*int_type).to_string(),
+        Some(Type::Float(float_type)) => float_type_to_ir(*float_type).to_string(),
         Some(Type::Bool) => "i1".to_string(),
         Some(Type::Char) => "i8".to_string(), // Characters as 8-bit integers
         Some(Type::String) => "ptr".to_string(), // String as pointer to character array
         Some(Type::Pointer { element_type, .. }) => {
-            let elem_type = type_to_llvm(type_context, *element_type);
+            let elem_type = type_to_ir(type_context, *element_type);
             format!("ptr to {}", elem_type) // Using 'ptr' for LLVM 15+ style
         }
         Some(Type::Array { element_type, size }) => {
-            let elem_type = type_to_llvm(type_context, *element_type);
+            let elem_type = type_to_ir(type_context, *element_type);
             format!("[{} x {}]", size, elem_type)
         }
         Some(Type::Slice { element_type }) => {
-            let elem_type = type_to_llvm(type_context, *element_type);
+            let elem_type = type_to_ir(type_context, *element_type);
             format!("slice<{}>", elem_type) // Custom representation for slices
         }
         Some(Type::Tuple { elements }) => {
             let elem_types: Vec<String> = elements
                 .iter()
-                .map(|&ty| type_to_llvm(type_context, ty))
+                .map(|&ty| type_to_ir(type_context, ty))
                 .collect();
             format!("{{ {} }}", elem_types.join(", "))
         }
         Some(Type::Struct { fields, .. }) => {
             let field_types: Vec<String> = fields
                 .iter()
-                .map(|(_, ty)| type_to_llvm(type_context, *ty))
+                .map(|(_, ty)| type_to_ir(type_context, *ty))
                 .collect();
             format!("%struct.{{ {} }}", field_types.join(", ")) // Custom struct representation
         }
@@ -323,13 +324,13 @@ fn type_to_llvm(type_context: &TypeContext, type_id: TypeId) -> String {
         }) => {
             let param_types: Vec<String> = params
                 .iter()
-                .map(|&ty| type_to_llvm(type_context, ty))
+                .map(|&ty| type_to_ir(type_context, ty))
                 .collect();
-            let return_type_str = type_to_llvm(type_context, *return_type);
+            let return_type_str = type_to_ir(type_context, *return_type);
             format!("{} ({})*", return_type_str, param_types.join(", ")) // Function pointer
         }
         Some(Type::Reference { element_type, .. }) => {
-            let elem_type = type_to_llvm(type_context, *element_type);
+            let elem_type = type_to_ir(type_context, *element_type);
             format!("ref {}", elem_type) // Custom representation for references
         }
         Some(Type::Void) => "void".to_string(),
@@ -339,7 +340,7 @@ fn type_to_llvm(type_context: &TypeContext, type_id: TypeId) -> String {
 }
 
 /// Convert integer type to LLVM-like string
-fn int_type_to_llvm(int_type: IntType) -> String {
+fn int_type_to_ir(int_type: IntType) -> String {
     match int_type {
         IntType::I8 => "i8".to_string(),
         IntType::I16 => "i16".to_string(),
@@ -357,7 +358,7 @@ fn int_type_to_llvm(int_type: IntType) -> String {
 }
 
 /// Convert float type to LLVM-like string
-fn float_type_to_llvm(float_type: FloatType) -> String {
+fn float_type_to_ir(float_type: FloatType) -> String {
     match float_type {
         FloatType::F32 => "float".to_string(),
         FloatType::F64 => "double".to_string(),
@@ -403,7 +404,7 @@ impl fmt::Display for BasicBlock {
 
 impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", opcode_to_llvm(&self.opcode))?;
+        write!(f, "{}", opcode_to_ir(&self.opcode))?;
 
         // Write type
         write!(f, " <?> ")?; // Would need type context to get actual type
@@ -421,7 +422,7 @@ impl fmt::Display for Instruction {
 
 impl fmt::Display for Opcode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", opcode_to_llvm(self))
+        write!(f, "{}", opcode_to_ir(self))
     }
 }
 
@@ -453,8 +454,8 @@ impl fmt::Display for Constant {
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Type::Int(int_type) => write!(f, "{}", int_type_to_llvm(*int_type)),
-            Type::Float(float_type) => write!(f, "{}", float_type_to_llvm(*float_type)),
+            Type::Int(int_type) => write!(f, "{}", int_type_to_ir(*int_type)),
+            Type::Float(float_type) => write!(f, "{}", float_type_to_ir(*float_type)),
             Type::Bool => write!(f, "bool"),
             Type::Char => write!(f, "char"),
             Type::String => write!(f, "string"),

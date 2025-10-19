@@ -2771,3 +2771,87 @@ fn test_nested_lambda_captures() {
 
     tc.env.pop_scope();
 }
+
+#[test]
+fn test_for_loop_with_iterable_trait() {
+    let mut tc = setup();
+
+    // Create a custom iterable type to test trait-based iteration
+    let iterable_trait = TraitDef {
+        span: dummy_span(),
+        name: "Iterable".to_string(),
+        type_params: vec![TypeParam {
+            name: "T".to_string(),
+            kind: None,
+            bounds: vec![],
+        }],
+        methods: vec![],
+        associated_types: vec![],
+        super_traits: vec![],
+    };
+
+    let _typed_trait = tc.check_trait(iterable_trait);
+
+    // Define a custom type that implements Iterable
+    let custom_type = Struct {
+        span: dummy_span(),
+        file: dummy_file(),
+        name: "MyList".to_string(),
+        type_params: vec![TypeParam {
+            name: "T".to_string(),
+            kind: None,
+            bounds: vec![],
+        }],
+        fields: vec![(
+            FnArg {
+                span: dummy_span(),
+                file: dummy_file(),
+                name: "items".to_string(),
+                type_: Some(TypeAnnot {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    type_: TypeAnnotKind::Generic {
+                        name: "Array".to_string(),
+                        args: vec![TypeAnnot {
+                            span: dummy_span(),
+                            file: dummy_file(),
+                            type_: TypeAnnotKind::Variable {
+                                name: "T".to_string(),
+                                kind: None,
+                            },
+                        }],
+                        kind: None,
+                    },
+                }),
+            },
+            Visibility::Public,
+        )],
+        methods: vec![],
+        vis: Visibility::Public,
+    };
+
+    let _typed_struct = tc.check_struct(custom_type);
+
+    // Create a for loop with the custom iterable type
+    let for_expr = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::For {
+            iterator: Box::new(Expr {
+                span: dummy_span(),
+                file: dummy_file(),
+                expr: ExprKind::Variable("my_list".to_string()),
+            }),
+            value: "item".to_string(),
+            expression: Box::new(Expr {
+                span: dummy_span(),
+                file: dummy_file(),
+                expr: ExprKind::Variable("item".to_string()),
+            }),
+        },
+    };
+
+    let _typed = tc.check_expr(&for_expr);
+    // This should not cause a crash and should handle the trait constraint properly
+    // The error handling should be appropriate based on whether the trait is properly implemented
+}

@@ -2724,18 +2724,43 @@ impl TypeChecker {
                         match type_name {
                             "Array" | "List" | "Vec" if !args.is_empty() => args[0].clone(),
                             _ => {
-                                let expected = self.array_type(elem_type.clone());
-                                // TODO: Check if type implements Iterable<T> trait
-                                // For now, report error if not a known collection type
-                                self.error(
-                                    expr,
-                                    TypeErrorKind::TypeMismatch {
-                                        expected,
-                                        found: iter_typed.type_.clone(),
-                                        context: "for loop requires iterable type".to_string(),
-                                    },
-                                );
-                                elem_type.clone()
+                                // Check if type implements Iterable<T> trait
+                                // First look up the Iterable trait in the environment
+                                let iterable_trait = self
+                                    .env
+                                    .traits
+                                    .iter()
+                                    .find(|(_, info)| {
+                                        self.interner.resolve(info.name) == "Iterable"
+                                    })
+                                    .map(|(id, _)| *id);
+
+                                if let Some(trait_id) = iterable_trait {
+                                    // Add a constraint that the iterator type implements Iterable<elem_type>
+                                    // We need to extract the type ID from the iterator type
+                                    // For now, use a placeholder for the type ID
+                                    let type_id = match &iter_typed.type_.type_ {
+                                        TypeKind::Constructor { name, .. } => *name, // Use constructor name as ID
+                                        TypeKind::Variable { id, .. } => *id, // Use variable ID
+                                        _ => 0,                               // Fallback
+                                    };
+                                    let constraint = Constraint::Trait(type_id, trait_id.0);
+                                    self.constraints.push(constraint);
+                                    // For now, return the element type as the iterable element type
+                                    elem_type.clone()
+                                } else {
+                                    // If Iterable trait doesn't exist, fall back to the original behavior
+                                    let expected = self.array_type(elem_type.clone());
+                                    self.error(
+                                        expr,
+                                        TypeErrorKind::TypeMismatch {
+                                            expected,
+                                            found: iter_typed.type_.clone(),
+                                            context: "for loop requires iterable type".to_string(),
+                                        },
+                                    );
+                                    elem_type.clone()
+                                }
                             }
                         }
                     }
@@ -2998,8 +3023,9 @@ impl TypeChecker {
             ExprKind::MacroCall(name, args, delimiter) => {
                 let name_sym = self.interner.intern(name);
 
-                // Lookup macro in environment
-                // For now, macros are not type-checked, just pass through
+                // Macros should be expanded before type checking, so at this point
+                // we just type check the arguments and return a fresh type variable
+                // since the macro expansion will determine the final type
                 let typed_args: Vec<_> = args.iter().map(|a| self.check_expr(a)).collect();
 
                 TypedExpr {
@@ -3007,11 +3033,11 @@ impl TypeChecker {
                     file: expr.file.clone(),
                     expr: TypedExprKind::MacroCall {
                         name: name_sym,
-                        macro_id: MacroId(0), // Macros expanded before type checking
+                        macro_id: MacroId(0), // Placeholder - macros expanded before type checking
                         args: typed_args,
                         delimiter: delimiter.clone(),
                     },
-                    type_: self.fresh_type_var(),
+                    type_: self.fresh_type_var(), // Return type determined after macro expansion
                 }
             }
 

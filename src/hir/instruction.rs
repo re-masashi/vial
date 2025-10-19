@@ -21,6 +21,7 @@ pub enum Opcode {
     Mul,
     Div,
     Rem,
+    Pow,
     BitAnd,
     BitOr,
     BitXor,
