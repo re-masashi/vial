@@ -30,7 +30,7 @@ fn test_keywords() {
 #[test]
 #[allow(clippy::approx_constant)]
 fn test_literals() {
-    let tokens = lex("42 2.71 true false \"hello\" r#\"raw\"");
+    let tokens = lex("42 3.14 true false \"hello\" r#\"raw\"");
     assert_eq!(
         tokens,
         vec![
