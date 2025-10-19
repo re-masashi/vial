@@ -209,5 +209,5 @@ fn main() {
     // TODO: Code generation
     // TODO: Bytecode and VM
 
-    println!("\n✨ Compilation complete!");
+    println!("Compilation complete!");
 }
