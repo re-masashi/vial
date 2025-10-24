@@ -1,0 +1,21 @@
+// Test effect handling functionality - based on working example
+effect Exception {
+    throw(string) -> !
+}
+
+def dangerous_func() -> int effects Exception {
+    perform throw("Something went wrong!")
+}
+
+def safe_wrapper() -> int {
+    handle {
+        dangerous_func()  // This will throw and be caught by the handler
+    } with {
+        throw(msg) => 42  // Handle exception by returning 42
+    }
+}
+
+def pub main() -> int {
+    let result = safe_wrapper();
+    result
+}

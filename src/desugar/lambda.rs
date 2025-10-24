@@ -804,7 +804,7 @@ impl LambdaDesugarer {
         };
 
         (new_expr, new_functions)
-    } // End of desugar_expr function
+    }
 
     fn create_function_from_lambda(
         &mut self,

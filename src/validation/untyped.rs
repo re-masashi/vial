@@ -85,7 +85,7 @@ impl UntypedValidator {
                     if func_box.as_ref().name == "main" {
                         // mangle the explicit main function name to avoid conflicts
                         let mangled_func = Function {
-                            name: "__mangled_main__".to_string(),
+                            name: "$mangled_main$".to_string(),
                             ..func_box.as_ref().clone()
                         };
                         other_nodes.push(ASTNode {
@@ -891,7 +891,7 @@ impl UntypedValidator {
         let was_in_user_function = self.in_user_function;
 
         self.in_function = true;
-        self.in_user_function = func.name != "main" && func.name != "__mangled_main__";
+        self.in_user_function = func.name != "main";
 
         let validated_body = func.body.map(|b| self.validate_expr(b));
 
