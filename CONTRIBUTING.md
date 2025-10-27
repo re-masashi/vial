@@ -48,7 +48,8 @@ vial/
 │   ├── typechecker/  # Type checking and inference
 │   ├── desugar/      # Desugaring transformations
 │   ├── validation/   # AST validation
-│   ├── hir/          # High-level Intermediate Representation
+│   ├── ir/           # Intermediate Representation
+│   ├── vm/           # VM + Opcode
 │   ├── main.rs       # Main entry point
 │   └── lib.rs        # Library exports
 ├── examples/         # Example Vial programs

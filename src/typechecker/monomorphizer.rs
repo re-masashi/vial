@@ -22,7 +22,7 @@ impl Monomorphizer {
     }
 
     pub fn monomorphize_program(&mut self, program: Vec<TypedASTNode>) -> Vec<TypedASTNode> {
-        // Collect all functions
+        // Collect all functions - make sure both generic and concrete functions are included
         for node in &program {
             if let TypedASTNodeKind::Function(func) = &node.node {
                 self.functions.insert(func.function_id, (**func).clone());
@@ -34,24 +34,27 @@ impl Monomorphizer {
         for node in program {
             match node.node {
                 TypedASTNodeKind::Function(func) => {
-                    if func.type_params.is_empty() {
+                    // Check if function is generic (has type parameters or type variables)
+                    let is_generic = !func.type_params.is_empty() || {
                         let type_vars = self.collect_type_vars_from_func(&func);
-                        if type_vars.is_empty() {
-                            // No type variables - keep it and monomorphize body
-                            let mono_func = self.monomorphize_function_body(*func);
-                            result.push(TypedASTNode {
-                                span: node.span,
-                                file: node.file,
-                                node: TypedASTNodeKind::Function(Box::new(mono_func)),
-                                attributes: node.attributes,
-                            });
-                        } else {
-                            // Has type variables but no type params - this is a generic function
-                            // Don't include it in output, it will be specialized
-                        }
+                        !type_vars.is_empty()
+                    };
+
+                    if is_generic {
+                        // This is a generic function - don't include it in output directly,
+                        // it will be specialized when called with concrete types
+                        // But we still need to store it for specialization later
+                        continue; // Don't add to result yet
+                    } else {
+                        // Non-generic function - keep it and monomorphize body
+                        let mono_func = self.monomorphize_function_body(*func);
+                        result.push(TypedASTNode {
+                            span: node.span,
+                            file: node.file,
+                            node: TypedASTNodeKind::Function(Box::new(mono_func)),
+                            attributes: node.attributes,
+                        });
                     }
-                    // Functions with explicit type parameters are also generic and shouldn't be included
-                    // until they are specialized
                 }
                 TypedASTNodeKind::Expr(expr) => {
                     let mono_expr = self.monomorphize_expr(expr);
@@ -104,7 +107,12 @@ impl Monomorphizer {
                     if let Some(original_func) = self.functions.get(&func_id).cloned() {
                         let type_vars = self.collect_type_vars_from_func(&original_func);
 
-                        if !type_vars.is_empty() {
+                        // Check if this function has type parameters or type variables that need monomorphization
+                        let needs_monomorphization =
+                            !type_vars.is_empty() || !original_func.type_params.is_empty();
+
+                        if needs_monomorphization {
+                            // Get concrete types from arguments
                             let concrete_types: Vec<_> = mono_args
                                 .iter()
                                 .map(|arg| self.type_to_key(&arg.type_))
@@ -743,6 +751,14 @@ impl Monomorphizer {
             .replace(",", "_");
         let specialized = format!("{}${}", base_str, type_str);
         self.interner.intern(&specialized)
+    }
+
+    pub fn fresh_function(&mut self) -> FunctionId {
+        self.id_gen.fresh_function()
+    }
+
+    pub fn fresh_binding(&mut self) -> BindingId {
+        self.id_gen.fresh_binding()
     }
 
     pub fn error_type(&self) -> Rc<Type> {

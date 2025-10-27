@@ -2856,18 +2856,17 @@ fn test_for_loop_with_iterable_trait() {
     // The error handling should be appropriate based on whether the trait is properly implemented
 }
 
-
 // Test for the specific monomorphization bug we fixed - generic function specialization
 #[test]
 fn test_monomorphization_generic_function_specialization_edge_cases() {
     let interner = Interner::new();
     let mut monomorphizer = Monomorphizer::new(interner);
-    
+
     // Test that the monomorphizer can handle empty programs without panicking
     let program = vec![];
     let result = monomorphizer.monomorphize_program(program);
     assert_eq!(result.len(), 0);
-    
+
     // Test that the monomorphizer properly handles function IDs without confusing them with binding IDs
     // This test verifies that the fix for the "index out of bounds" error works correctly
     // Previously, this would cause a panic due to improper ID conversion
@@ -2878,24 +2877,25 @@ fn test_monomorphization_generic_function_specialization_edge_cases() {
 fn test_polymorphic_function_detection_explicit_type_params() {
     let interner = Interner::new();
     let mut monomorphizer = Monomorphizer::new(interner);
-    
+
     // Create a polymorphic function with explicit type parameters
     let poly_func = TypedFunction {
         span: dummy_span(),
         file: dummy_file(),
         vis: Visibility::Public,
-        name: monomorphizer.interner.intern("id_gen").0,
-        function_id: monomorphizer.id_gen.fresh_function(),
-        type_params: vec![TypeParam {
-            name: monomorphizer.interner.intern("T").0,
-            kind: Some(Kind::Star),
+        name: monomorphizer.interner.intern("id_gen"),
+        function_id: monomorphizer.fresh_function(),
+        type_params: vec![TypedTypeParam {
+            name: monomorphizer.interner.intern("T"),
+            var_id: TypeId(0),
+            kind: Kind::Star,
             bounds: vec![],
         }],
         args: vec![TypedFnArg {
             span: dummy_span(),
             file: dummy_file(),
-            name: monomorphizer.interner.intern("x").0,
-            binding_id: monomorphizer.id_gen.fresh_binding(),
+            name: monomorphizer.interner.intern("x"),
+            binding_id: monomorphizer.fresh_binding(),
             type_: Rc::new(Type {
                 span: None,
                 file: None,
@@ -2950,7 +2950,7 @@ fn test_polymorphic_function_detection_explicit_type_params() {
             span: dummy_span(),
             file: dummy_file(),
             expr: TypedExprKind::Variable {
-                name: monomorphizer.interner.intern("x").0,
+                name: monomorphizer.interner.intern("x"),
                 binding_id: BindingId(1), // Should match the arg's binding_id
             },
             type_: Rc::new(Type {
@@ -2977,21 +2977,21 @@ fn test_polymorphic_function_detection_explicit_type_params() {
 fn test_non_polymorphic_function_detection() {
     let interner = Interner::new();
     let mut monomorphizer = Monomorphizer::new(interner);
-    
+
     // Create a non-polymorphic function
     let non_poly_func = TypedFunction {
         span: dummy_span(),
         file: dummy_file(),
         vis: Visibility::Public,
-        name: monomorphizer.interner.intern("add").0,
-        function_id: monomorphizer.id_gen.fresh_function(),
+        name: monomorphizer.interner.intern("add"),
+        function_id: monomorphizer.fresh_function(),
         type_params: vec![],
         args: vec![
             TypedFnArg {
                 span: dummy_span(),
                 file: dummy_file(),
-                name: monomorphizer.interner.intern("a").0,
-                binding_id: monomorphizer.id_gen.fresh_binding(),
+                name: monomorphizer.interner.intern("a"),
+                binding_id: monomorphizer.fresh_binding(),
                 type_: Rc::new(Type {
                     span: None,
                     file: None,
@@ -3005,8 +3005,8 @@ fn test_non_polymorphic_function_detection() {
             TypedFnArg {
                 span: dummy_span(),
                 file: dummy_file(),
-                name: monomorphizer.interner.intern("b").0,
-                binding_id: monomorphizer.id_gen.fresh_binding(),
+                name: monomorphizer.interner.intern("b"),
+                binding_id: monomorphizer.fresh_binding(),
                 type_: Rc::new(Type {
                     span: None,
                     file: None,
@@ -3073,7 +3073,7 @@ fn test_non_polymorphic_function_detection() {
                     span: dummy_span(),
                     file: dummy_file(),
                     expr: TypedExprKind::Variable {
-                        name: monomorphizer.interner.intern("a").0,
+                        name: monomorphizer.interner.intern("a"),
                         binding_id: BindingId(0), // Should match first arg's binding_id
                     },
                     type_: Rc::new(Type {
@@ -3091,7 +3091,7 @@ fn test_non_polymorphic_function_detection() {
                     span: dummy_span(),
                     file: dummy_file(),
                     expr: TypedExprKind::Variable {
-                        name: monomorphizer.interner.intern("b").0,
+                        name: monomorphizer.interner.intern("b"),
                         binding_id: BindingId(1), // Should match second arg's binding_id
                     },
                     type_: Rc::new(Type {
@@ -3103,15 +3103,6 @@ fn test_non_polymorphic_function_detection() {
                             kind: Kind::Star,
                         },
                     }),
-                }),
-                type_: Rc::new(Type {
-                    span: None,
-                    file: None,
-                    type_: TypeKind::Constructor {
-                        name: monomorphizer.interner.intern("Int").0,
-                        args: vec![],
-                        kind: Kind::Star,
-                    },
                 }),
             },
             type_: Rc::new(Type {
@@ -3137,21 +3128,21 @@ fn test_non_polymorphic_function_detection() {
 fn test_make_specialized_name_generation() {
     let interner = Interner::new();
     let mut monomorphizer = Monomorphizer::new(interner);
-    
+
     // Test basic specialization name generation
     let base_name = monomorphizer.interner.intern("id");
     let concrete_types = vec!["Int".to_string()];
     let specialized_name = monomorphizer.make_specialized_name(base_name, &concrete_types);
-    
+
     let resolved_name = monomorphizer.interner.resolve(specialized_name);
     assert!(resolved_name.starts_with("id$"));
     assert!(resolved_name.contains("Int"));
-    
+
     // Test complex specialization name generation
     let base_name2 = monomorphizer.interner.intern("map");
     let concrete_types2 = vec!["List".to_string(), "Int".to_string(), "String".to_string()];
     let specialized_name2 = monomorphizer.make_specialized_name(base_name2, &concrete_types2);
-    
+
     let resolved_name2 = monomorphizer.interner.resolve(specialized_name2);
     assert!(resolved_name2.starts_with("map$"));
     assert!(resolved_name2.contains("List"));
@@ -3164,7 +3155,7 @@ fn test_make_specialized_name_generation() {
 fn test_error_type_creation() {
     let monomorphizer = Monomorphizer::new(Interner::new());
     let error_type = monomorphizer.error_type();
-    
+
     // Verify that the error type is properly created
     assert!(matches!(error_type.type_, TypeKind::Error));
 }

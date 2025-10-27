@@ -141,9 +141,7 @@ impl TypedValidator {
                     self.validate_expr(e);
                 }
             }
-            TypedExprKind::Variable {
-                  ..
-            } => {
+            TypedExprKind::Variable { .. } => {
                 // Note: More comprehensive validation would check that binding_id refers to
                 // an actual variable binding in scope. For now, we just ensure basic validity.
                 //

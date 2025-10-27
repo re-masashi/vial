@@ -201,7 +201,7 @@ impl ModuleResolver {
                 }
 
                 let module_file = if module_path.is_empty() {
-                    pkg_dir.join("lib.ni")
+                    pkg_dir.join("lib.vi")
                 } else {
                     pkg_dir.join(module_path.join(std::path::MAIN_SEPARATOR_STR))
                 };
@@ -216,13 +216,13 @@ impl ModuleResolver {
     }
 
     fn find_module_file(&self, path: &Path) -> Option<PathBuf> {
-        let ni_file = path.with_extension("ni");
-        if ni_file.exists() && ni_file.is_file() {
-            return Some(ni_file);
+        let vi_file = path.with_extension("vi");
+        if vi_file.exists() && vi_file.is_file() {
+            return Some(vi_file);
         }
 
         if path.is_dir() {
-            let mod_file = path.join("mod.ni");
+            let mod_file = path.join("mod.vi");
             if mod_file.exists() && mod_file.is_file() {
                 return Some(mod_file);
             }
