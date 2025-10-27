@@ -2,7 +2,7 @@ trait Display {
     def show(self) -> string
 }
 
-def print_generic<T: Display>(x: T) -> string {
+def print_generic<T>(x: T) -> string where T ~ Display {
     x.show()
 }
 

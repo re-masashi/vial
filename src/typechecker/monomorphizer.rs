@@ -677,9 +677,9 @@ impl Monomorphizer {
     pub fn collect_type_vars_from_func(&self, func: &TypedFunction) -> Vec<usize> {
         // Check if the function type is a Forall type, which indicates polymorphism
         match &func.function_type.type_ {
-            TypeKind::Forall { .. } => {
-                // This is a polymorphic function, so return a non-empty vector to trigger specialization
-                vec![0] // Just return a dummy value to indicate this is polymorphic
+            TypeKind::Forall { vars, .. } => {
+                // This is a polymorphic function, extract the actual type variable IDs
+                vars.iter().map(|(id, _)| *id).collect()
             }
             _ => {
                 // For regular functions, collect actual type variables

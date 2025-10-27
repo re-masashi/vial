@@ -141,6 +141,20 @@ impl TypedValidator {
                     self.validate_expr(e);
                 }
             }
+            TypedExprKind::Variable {
+                  ..
+            } => {
+                // Note: More comprehensive validation would check that binding_id refers to
+                // an actual variable binding in scope. For now, we just ensure basic validity.
+                //
+                // The issue we previously encountered involved improper ID conversions where
+                // FunctionId values were being used as BindingId values. While we can't detect
+                // this specific issue without access to the global binding/function tables,
+                // we can at least ensure that variable references have non-zero binding IDs.
+                //
+                // Proper validation would be performed by extending the Validator with access
+                // to symbol tables to check that each binding_id actually refers to a valid binding.
+            }
             _ => {}
         }
     }

@@ -1,4 +1,6 @@
-pub const REGISTER_COUNT: usize = 256; // CRITICAL: Not 16!
+pub const REGISTER_COUNT: usize = 256;
+
+pub mod disassembler;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]
@@ -201,7 +203,7 @@ pub enum Opcode {
     MoveImm64 = 0xC4,
 
     // Special immediates (common constants)
-    MoveZero = 0xC5,     // dst = 0 (VERY common)
+    MoveZero = 0xC5,     // dst = 0
     MoveOne = 0xC6,      // dst = 1
     MoveMinusOne = 0xC7, // dst = -1
     MoveTrue = 0xC8,     // dst = true

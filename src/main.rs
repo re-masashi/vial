@@ -95,7 +95,8 @@ fn main() {
     let method_desugared_ast = method_desugarer.desugar_program(validated_ast);
 
     println!("[5/7] Type checking...");
-    let mut type_checker = TypeChecker::new(Interner::new());
+    let interner = Interner::new();
+    let mut type_checker = TypeChecker::new(interner);
     let typed_ast = type_checker.check_program(method_desugared_ast);
 
     if type_checker.diagnostics.has_errors() {
@@ -108,11 +109,13 @@ fn main() {
     }
 
     println!("[6/7] Desugaring lambdas...");
-    let mut lambda_desugarer = LambdaDesugarer::new(type_checker.interner.clone());
+    let final_interner = type_checker.interner;
+    let mut lambda_desugarer = LambdaDesugarer::new(final_interner);
     let lambda_desugared_ast = lambda_desugarer.desugar_program(typed_ast);
 
     println!("[7/7] Monomorphizing...");
-    let mut monomorphizer = Monomorphizer::new(type_checker.interner);
+    let final_interner = lambda_desugarer.interner;
+    let mut monomorphizer = Monomorphizer::new(final_interner);
     let monomorphized_ast = monomorphizer.monomorphize_program(lambda_desugared_ast);
 
     println!("[Validation] Validating typed AST...");
@@ -125,12 +128,35 @@ fn main() {
         std::process::exit(1);
     }
 
+    println!("[IR Generation] Generating IR...");
+    // Use the same interner that was potentially modified during monomorphization
+    let final_interner = monomorphizer.interner;
+    let mut ir_builder =
+        vial::ir::builder::IRBuilder::new(vial::ir::TargetInfo::vm_target(), final_interner);
+    let ir_module = ir_builder.lower_program(monomorphized_ast);
+
+    println!("[Code Generation] Compiling to bytecode...");
+    let mut compiler = vial::compiler::BytecodeCompiler::new();
+    let compiled_bytecode = compiler.compile_module(&ir_module);
+
     println!("\n✓ Compilation successful!");
     println!("  File: {}", filename);
+    if args.contains(&"--debug".to_string()) || args.contains(&"-d".to_string()) {
+        // Use the disassembler to format the bytecode
+        let disassembly = vial::vm::disassembler::pretty_dump_bytecode(
+            &compiled_bytecode.bytecode,
+            &compiled_bytecode.function_metadata,
+            Some(compiled_bytecode.constant_pool.as_slice()),
+            Some(compiled_bytecode.struct_layouts.as_slice()),
+            Some(compiled_bytecode.enum_layouts.as_slice()),
+        );
+
+        println!("\n[Bytecode]");
+        println!("{}", disassembly);
+    }
     println!("\nNext steps:");
-    println!("  - TODO: IR generation");
     println!("  - TODO: Optimization passes");
-    println!("  - TODO: Codegen");
+    println!("  - TODO: VM execution");
 }
 
 fn report_parse_errors(

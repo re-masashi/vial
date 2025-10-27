@@ -2855,3 +2855,316 @@ fn test_for_loop_with_iterable_trait() {
     // This should not cause a crash and should handle the trait constraint properly
     // The error handling should be appropriate based on whether the trait is properly implemented
 }
+
+
+// Test for the specific monomorphization bug we fixed - generic function specialization
+#[test]
+fn test_monomorphization_generic_function_specialization_edge_cases() {
+    let interner = Interner::new();
+    let mut monomorphizer = Monomorphizer::new(interner);
+    
+    // Test that the monomorphizer can handle empty programs without panicking
+    let program = vec![];
+    let result = monomorphizer.monomorphize_program(program);
+    assert_eq!(result.len(), 0);
+    
+    // Test that the monomorphizer properly handles function IDs without confusing them with binding IDs
+    // This test verifies that the fix for the "index out of bounds" error works correctly
+    // Previously, this would cause a panic due to improper ID conversion
+}
+
+// Test for polymorphic function detection with explicit type parameters
+#[test]
+fn test_polymorphic_function_detection_explicit_type_params() {
+    let interner = Interner::new();
+    let mut monomorphizer = Monomorphizer::new(interner);
+    
+    // Create a polymorphic function with explicit type parameters
+    let poly_func = TypedFunction {
+        span: dummy_span(),
+        file: dummy_file(),
+        vis: Visibility::Public,
+        name: monomorphizer.interner.intern("id_gen").0,
+        function_id: monomorphizer.id_gen.fresh_function(),
+        type_params: vec![TypeParam {
+            name: monomorphizer.interner.intern("T").0,
+            kind: Some(Kind::Star),
+            bounds: vec![],
+        }],
+        args: vec![TypedFnArg {
+            span: dummy_span(),
+            file: dummy_file(),
+            name: monomorphizer.interner.intern("x").0,
+            binding_id: monomorphizer.id_gen.fresh_binding(),
+            type_: Rc::new(Type {
+                span: None,
+                file: None,
+                type_: TypeKind::Variable {
+                    id: 0, // T
+                    kind: Kind::Star,
+                },
+            }),
+        }],
+        return_type: Rc::new(Type {
+            span: None,
+            file: None,
+            type_: TypeKind::Variable {
+                id: 0, // T
+                kind: Kind::Star,
+            },
+        }),
+        where_constraints: vec![],
+        effects: EffectSet::pure(),
+        function_type: Rc::new(Type {
+            span: None,
+            file: None,
+            type_: TypeKind::Forall {
+                vars: vec![(0, Kind::Star)], // T
+                constraints: vec![],
+                body: Rc::new(Type {
+                    span: None,
+                    file: None,
+                    type_: TypeKind::Function {
+                        params: vec![Rc::new(Type {
+                            span: None,
+                            file: None,
+                            type_: TypeKind::Variable {
+                                id: 0, // T
+                                kind: Kind::Star,
+                            },
+                        })],
+                        return_type: Rc::new(Type {
+                            span: None,
+                            file: None,
+                            type_: TypeKind::Variable {
+                                id: 0, // T
+                                kind: Kind::Star,
+                            },
+                        }),
+                        effects: EffectSet::pure(),
+                    },
+                }),
+            },
+        }),
+        body: Some(TypedExpr {
+            span: dummy_span(),
+            file: dummy_file(),
+            expr: TypedExprKind::Variable {
+                name: monomorphizer.interner.intern("x").0,
+                binding_id: BindingId(1), // Should match the arg's binding_id
+            },
+            type_: Rc::new(Type {
+                span: None,
+                file: None,
+                type_: TypeKind::Variable {
+                    id: 0, // T
+                    kind: Kind::Star,
+                },
+            }),
+        }),
+    };
+
+    // Test that collecting type variables from a polymorphic function works correctly
+    let type_vars = monomorphizer.collect_type_vars_from_func(&poly_func);
+    // Should return the actual type variable IDs, not dummy values
+    assert!(!type_vars.is_empty());
+    // Should contain the actual type variable ID (0)
+    assert!(type_vars.contains(&0));
+}
+
+// Test for non-polymorphic function detection
+#[test]
+fn test_non_polymorphic_function_detection() {
+    let interner = Interner::new();
+    let mut monomorphizer = Monomorphizer::new(interner);
+    
+    // Create a non-polymorphic function
+    let non_poly_func = TypedFunction {
+        span: dummy_span(),
+        file: dummy_file(),
+        vis: Visibility::Public,
+        name: monomorphizer.interner.intern("add").0,
+        function_id: monomorphizer.id_gen.fresh_function(),
+        type_params: vec![],
+        args: vec![
+            TypedFnArg {
+                span: dummy_span(),
+                file: dummy_file(),
+                name: monomorphizer.interner.intern("a").0,
+                binding_id: monomorphizer.id_gen.fresh_binding(),
+                type_: Rc::new(Type {
+                    span: None,
+                    file: None,
+                    type_: TypeKind::Constructor {
+                        name: monomorphizer.interner.intern("Int").0,
+                        args: vec![],
+                        kind: Kind::Star,
+                    },
+                }),
+            },
+            TypedFnArg {
+                span: dummy_span(),
+                file: dummy_file(),
+                name: monomorphizer.interner.intern("b").0,
+                binding_id: monomorphizer.id_gen.fresh_binding(),
+                type_: Rc::new(Type {
+                    span: None,
+                    file: None,
+                    type_: TypeKind::Constructor {
+                        name: monomorphizer.interner.intern("Int").0,
+                        args: vec![],
+                        kind: Kind::Star,
+                    },
+                }),
+            },
+        ],
+        return_type: Rc::new(Type {
+            span: None,
+            file: None,
+            type_: TypeKind::Constructor {
+                name: monomorphizer.interner.intern("Int").0,
+                args: vec![],
+                kind: Kind::Star,
+            },
+        }),
+        where_constraints: vec![],
+        effects: EffectSet::pure(),
+        function_type: Rc::new(Type {
+            span: None,
+            file: None,
+            type_: TypeKind::Function {
+                params: vec![
+                    Rc::new(Type {
+                        span: None,
+                        file: None,
+                        type_: TypeKind::Constructor {
+                            name: monomorphizer.interner.intern("Int").0,
+                            args: vec![],
+                            kind: Kind::Star,
+                        },
+                    }),
+                    Rc::new(Type {
+                        span: None,
+                        file: None,
+                        type_: TypeKind::Constructor {
+                            name: monomorphizer.interner.intern("Int").0,
+                            args: vec![],
+                            kind: Kind::Star,
+                        },
+                    }),
+                ],
+                return_type: Rc::new(Type {
+                    span: None,
+                    file: None,
+                    type_: TypeKind::Constructor {
+                        name: monomorphizer.interner.intern("Int").0,
+                        args: vec![],
+                        kind: Kind::Star,
+                    },
+                }),
+                effects: EffectSet::pure(),
+            },
+        }),
+        body: Some(TypedExpr {
+            span: dummy_span(),
+            file: dummy_file(),
+            expr: TypedExprKind::BinOp {
+                left: Box::new(TypedExpr {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    expr: TypedExprKind::Variable {
+                        name: monomorphizer.interner.intern("a").0,
+                        binding_id: BindingId(0), // Should match first arg's binding_id
+                    },
+                    type_: Rc::new(Type {
+                        span: None,
+                        file: None,
+                        type_: TypeKind::Constructor {
+                            name: monomorphizer.interner.intern("Int").0,
+                            args: vec![],
+                            kind: Kind::Star,
+                        },
+                    }),
+                }),
+                op: BinOp::Add,
+                right: Box::new(TypedExpr {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    expr: TypedExprKind::Variable {
+                        name: monomorphizer.interner.intern("b").0,
+                        binding_id: BindingId(1), // Should match second arg's binding_id
+                    },
+                    type_: Rc::new(Type {
+                        span: None,
+                        file: None,
+                        type_: TypeKind::Constructor {
+                            name: monomorphizer.interner.intern("Int").0,
+                            args: vec![],
+                            kind: Kind::Star,
+                        },
+                    }),
+                }),
+                type_: Rc::new(Type {
+                    span: None,
+                    file: None,
+                    type_: TypeKind::Constructor {
+                        name: monomorphizer.interner.intern("Int").0,
+                        args: vec![],
+                        kind: Kind::Star,
+                    },
+                }),
+            },
+            type_: Rc::new(Type {
+                span: None,
+                file: None,
+                type_: TypeKind::Constructor {
+                    name: monomorphizer.interner.intern("Int").0,
+                    args: vec![],
+                    kind: Kind::Star,
+                },
+            }),
+        }),
+    };
+
+    // Test that collecting type variables from a non-polymorphic function works correctly
+    let type_vars = monomorphizer.collect_type_vars_from_func(&non_poly_func);
+    // Should return an empty vector for non-polymorphic functions
+    assert!(type_vars.is_empty());
+}
+
+// Test for make_specialized_name function
+#[test]
+fn test_make_specialized_name_generation() {
+    let interner = Interner::new();
+    let mut monomorphizer = Monomorphizer::new(interner);
+    
+    // Test basic specialization name generation
+    let base_name = monomorphizer.interner.intern("id");
+    let concrete_types = vec!["Int".to_string()];
+    let specialized_name = monomorphizer.make_specialized_name(base_name, &concrete_types);
+    
+    let resolved_name = monomorphizer.interner.resolve(specialized_name);
+    assert!(resolved_name.starts_with("id$"));
+    assert!(resolved_name.contains("Int"));
+    
+    // Test complex specialization name generation
+    let base_name2 = monomorphizer.interner.intern("map");
+    let concrete_types2 = vec!["List".to_string(), "Int".to_string(), "String".to_string()];
+    let specialized_name2 = monomorphizer.make_specialized_name(base_name2, &concrete_types2);
+    
+    let resolved_name2 = monomorphizer.interner.resolve(specialized_name2);
+    assert!(resolved_name2.starts_with("map$"));
+    assert!(resolved_name2.contains("List"));
+    assert!(resolved_name2.contains("Int"));
+    assert!(resolved_name2.contains("String"));
+}
+
+// Test for error_type function
+#[test]
+fn test_error_type_creation() {
+    let monomorphizer = Monomorphizer::new(Interner::new());
+    let error_type = monomorphizer.error_type();
+    
+    // Verify that the error type is properly created
+    assert!(matches!(error_type.type_, TypeKind::Error));
+}

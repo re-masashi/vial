@@ -381,9 +381,8 @@ impl Diagnostics {
         interner: &Interner,
         sources: &std::collections::HashMap<String, String>,
     ) {
-        let var_name = interner.resolve(Symbol(0));
-        let var_name2 = interner.resolve(Symbol(2));
-        println!("{:?} 0: {} 2: {} ", self.type_errors, var_name, var_name2);
+        // Debug print statement removed to avoid invalid interner access
+        // println!("{:?}", self.type_errors);
 
         // TODO: Sort errors by location for better UX
         for error in &self.type_errors {
