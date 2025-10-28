@@ -1,0 +1,12 @@
+// Basic effect definition and usage
+effect Console {
+    print_line(string) -> ()
+}
+
+def hello_world() -> () effects Console {
+    perform print_line("Hello, Effects!")
+}
+
+def pub main() -> int {
+    42
+}

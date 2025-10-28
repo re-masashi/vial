@@ -171,11 +171,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on contributing to the Via
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Acknowledgments
-
-Vial draws inspiration from several functional programming languages, including:
-
-- ML family languages (OCaml, F#)
-- Haskell (effects, type classes)
-- Rust (ownership concepts)
-- Modern research languages with algebraic effects
+TODOs:
+- Generics on effects
+- Fixing traits a bit

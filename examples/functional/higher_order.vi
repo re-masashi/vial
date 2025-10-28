@@ -1,0 +1,27 @@
+// Higher-order functions example
+// NOTE: This example is currently commented out because List and Array types
+// are not defined in the basic language, which causes type errors.
+/*
+def map<T, U>(arr: Array<T>, f: fn(T) -> U) -> Array<U> {
+    let result = [];
+    for item in arr {
+        result.push(f(item))
+    };
+    result
+}
+
+def double(x: int) -> int {
+    x * 2
+}
+
+def pub main() -> int {
+    let numbers = [1, 2, 3, 4, 5];
+    let doubled = map(numbers, double);
+    
+    // Just return the first element of the result to have a return value
+    doubled[0]  
+}
+*/
+def pub main() -> int {
+    0  // Placeholder return
+}

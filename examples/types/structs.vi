@@ -1,0 +1,14 @@
+// Basic type definitions
+struct Point {
+    x: int,
+    y: int,
+}
+
+def create_point(x: int, y: int) -> Point {
+    Point { x: x, y: y }
+}
+
+def pub main() -> int {
+    let point = create_point(3, 4);
+    point.x + point.y  // 7
+}

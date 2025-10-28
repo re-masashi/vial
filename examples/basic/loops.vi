@@ -1,0 +1,38 @@
+// Basic loops example
+def pub main() -> int {
+    let sum = 0;
+    let counter = 0;
+    
+    // While loop example
+    let i = 0;
+    while i < 5 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    
+    // Another while loop with different condition
+    let j = 10;
+    let product = 1;
+    while j > 5 {
+        product = product * j;
+        j = j - 1;
+    }
+    
+    // Simulating a for loop using while (since actual for loop syntax might vary)
+    let factorial = 1;
+    let k = 1;
+    let n = 5;
+    while k <= n {
+        factorial = factorial * k;
+        k = k + 1;
+    }
+    
+    // Simple loop that counts down
+    let countdown = 10;
+    while countdown > 0 {
+        countdown = countdown - 1;
+    }
+    
+    // Return combined result of all loop operations
+    sum + product + factorial + countdown
+}

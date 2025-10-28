@@ -1,0 +1,16 @@
+// Generic function example
+def identity<T>(x: T) -> T {
+    x
+}
+
+/*
+That is the same as
+def identity(x) {
+    x
+}
+*/
+
+def pub main() -> int {
+    let result = identity(42);
+    result
+}

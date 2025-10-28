@@ -1,0 +1,14 @@
+// State effect example
+effect State {
+    get() -> int,
+    put(int) -> ()
+}
+
+def increment() -> () effects State {
+    let current = perform get();
+    perform put(current + 1)
+}
+
+def pub main() -> int {
+    0
+}

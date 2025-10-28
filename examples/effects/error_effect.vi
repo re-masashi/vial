@@ -1,0 +1,15 @@
+// Error effect example
+effect Error {
+    raise(string) -> !
+}
+
+def divide(x: int, y: int) -> int effects Error {
+    if y == 0 {
+        perform raise("Division by zero")
+    };
+    x / y
+}
+
+def pub main() -> int {
+    0
+}

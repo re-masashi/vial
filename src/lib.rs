@@ -1,4 +1,5 @@
 pub mod ast;
+pub mod bytecode_validator;
 pub mod desugar;
 pub mod lexer;
 pub mod parser;

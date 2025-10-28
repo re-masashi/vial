@@ -1,0 +1,4 @@
+// Basic Hello World example
+def pub main() -> int {
+    42  // Return a simple value
+}

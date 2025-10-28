@@ -1,0 +1,40 @@
+// Pipe operator example (Conceptual)
+// Note: The pipe operator (|>) is lexically and syntactically supported in Vial
+// but is not fully implemented in the type checker. This example demonstrates
+// the intended usage pattern conceptually.
+
+// In a fully implemented pipe system, these would work:
+// 5 |> double          // equivalent to double(5)
+// 3 |> double |> square // equivalent to square(double(3))
+
+// The pipe operator |> is a binary operator that threads the value on the left
+// as the first argument to the function on the right.
+// For example: x |> f |> g should be equivalent to g(f(x))
+
+def add(x: int, y: int) -> int {
+    x + y
+}
+
+def double(x: int) -> int {
+    x * 2
+}
+
+def square(x: int) -> int {
+    x * x
+}
+
+// To achieve pipe-like behavior in current Vial, use direct function application:
+def pub main() -> int {
+    // Instead of: 5 |> double, use:
+    let pipe1 = double(5);
+    
+    // Instead of: 3 |> double |> square, use:
+    let pipe2 = square(double(3));
+    
+    // Instead of: 4 |> square |> double |> (\x -> add(x, 1)), use:
+    let temp = square(4);      // 16
+    let temp2 = double(temp);  // 32
+    let pipe3 = add(temp2, 1); // 33
+    
+    pipe1 + pipe2 + pipe3
+}

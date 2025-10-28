@@ -1,0 +1,48 @@
+// Pipe operations example
+def add(x: int, y: int) -> int {
+    x + y
+}
+
+def multiply(x: int, y: int) -> int {
+    x * y
+}
+
+def square(x: int) -> int {
+    x * x
+}
+
+def double(x: int) -> int {
+    x * 2
+}
+
+def subtract(x: int, y: int) -> int {
+    x - y
+}
+
+def pub main() -> int {
+    // Basic pipe usage: value |> function
+    // Instead of: add(5, 3) we can write: 5 |> add(?, 3) if the function is curried
+    // However, since Vial uses a different approach for pipes, we'll use function application
+    
+    // Simple pipe chains: apply functions from left to right
+    // Equivalent to: square(double(3)) = square(6) = 36
+    let result1 = 3 |> double |> square;
+    
+    // More complex pipe: 5 |> double |> add(?, 10) |> square
+    // Note: Vial syntax might require lambda for partial application
+    // For now: double(5) |> add(10, ?) |> square - but this needs lambdas
+    // So we'll do a sequence: double(5) would be 10, then add(10, 10) would be 20, then square(20) would be 400
+    // But with pipes: 5 |> double |> (\x -> add(x, 10)) |> square
+    
+    // For now focusing on basic function composition with pipes
+    let result2 = 4 |> square |> double;  // square(4) = 16, double(16) = 32
+    
+    // Multiple pipe operations
+    let result3 = 10 |> double |> subtract(?, 5) |> square;  // This would need lambda syntax
+    
+    // A more realistic pipe chain with available functions
+    let result4 = 5 |> double |> square;  // double(5) = 10, square(10) = 100
+    
+    // Return combined results
+    result1 + result2 + result4
+}

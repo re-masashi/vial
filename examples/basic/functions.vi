@@ -1,0 +1,14 @@
+// Basic function definition and usage
+def add(x: int, y: int) -> int {
+    x + y
+}
+
+def multiply(x: int, y: int) -> int {
+    x * y
+}
+
+def pub main() -> int {
+    let result = add(10, 20);
+    let final_result = multiply(result, 2);  // (10 + 20) * 2 = 60
+    final_result
+}
