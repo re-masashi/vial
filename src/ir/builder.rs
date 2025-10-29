@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::ops::Range;
 use std::rc::Rc;
 
@@ -14,18 +14,21 @@ use crate::ir::{
     TargetInfo, ValueId, VariantId,
 };
 
-pub struct IRBuilder {
-    // Type registry (filled in Pass 1)
-    structs: HashMap<StructId, IRStruct>,
-    enums: HashMap<EnumId, IREnum>,
-    effects: HashMap<EffectId, IREffect>,
-    functions: HashMap<FunctionId, IRFunction>,
+// Use BTreeMap for deterministic ordering instead of HashMap
+type DeterministicMap<K, V> = BTreeMap<K, V>;
 
-    // Name → ID mappings
-    struct_names: HashMap<String, StructId>,
-    enum_names: HashMap<String, EnumId>,
-    effect_names: HashMap<String, EffectId>,
-    function_names: HashMap<String, FunctionId>,
+pub struct IRBuilder {
+    // Type registry (filled in Pass 1) - using BTreeMap for deterministic ordering
+    structs: DeterministicMap<StructId, IRStruct>,
+    enums: DeterministicMap<EnumId, IREnum>,
+    effects: DeterministicMap<EffectId, IREffect>,
+    functions: DeterministicMap<FunctionId, IRFunction>,
+
+    // Name → ID mappings - using BTreeMap for deterministic ordering
+    struct_names: DeterministicMap<String, StructId>,
+    enum_names: DeterministicMap<String, EnumId>,
+    effect_names: DeterministicMap<String, EffectId>,
+    function_names: DeterministicMap<String, FunctionId>,
 
     // ID generators
     next_struct_id: usize,
@@ -45,14 +48,14 @@ pub struct IRBuilder {
 impl IRBuilder {
     pub fn new(target: TargetInfo, interner: crate::ast::Interner) -> Self {
         Self {
-            structs: HashMap::new(),
-            enums: HashMap::new(),
-            effects: HashMap::new(),
-            functions: HashMap::new(),
-            struct_names: HashMap::new(),
-            enum_names: HashMap::new(),
-            effect_names: HashMap::new(),
-            function_names: HashMap::new(),
+            structs: BTreeMap::new(),
+            enums: BTreeMap::new(),
+            effects: BTreeMap::new(),
+            functions: BTreeMap::new(),
+            struct_names: BTreeMap::new(),
+            enum_names: BTreeMap::new(),
+            effect_names: BTreeMap::new(),
+            function_names: BTreeMap::new(),
             next_struct_id: 0,
             next_enum_id: 0,
             next_effect_id: 0,
@@ -73,12 +76,41 @@ impl IRBuilder {
         // Pass 2: Lower function bodies
         self.lower_function_bodies(&ast);
 
-        // Build the final module
+        // Build the final module with deterministic ordering
+        // Collect keys and sort them to ensure consistent order
+        let mut struct_keys: Vec<_> = self.structs.keys().cloned().collect();
+        struct_keys.sort();
+        let structs: Vec<_> = struct_keys
+            .into_iter()
+            .map(|id| self.structs[&id].clone())
+            .collect();
+
+        let mut enum_keys: Vec<_> = self.enums.keys().cloned().collect();
+        enum_keys.sort();
+        let enums: Vec<_> = enum_keys
+            .into_iter()
+            .map(|id| self.enums[&id].clone())
+            .collect();
+
+        let mut effect_keys: Vec<_> = self.effects.keys().cloned().collect();
+        effect_keys.sort();
+        let effects: Vec<_> = effect_keys
+            .into_iter()
+            .map(|id| self.effects[&id].clone())
+            .collect();
+
+        let mut function_keys: Vec<_> = self.functions.keys().cloned().collect();
+        function_keys.sort();
+        let functions: Vec<_> = function_keys
+            .into_iter()
+            .map(|id| self.functions[&id].clone())
+            .collect();
+
         IRModule {
-            structs: self.structs.values().cloned().collect(),
-            enums: self.enums.values().cloned().collect(),
-            effects: self.effects.values().cloned().collect(),
-            functions: self.functions.values().cloned().collect(),
+            structs,
+            enums,
+            effects,
+            functions,
             function_map: self
                 .functions
                 .iter()
@@ -311,7 +343,7 @@ impl IRBuilder {
             span: f.span.clone(),
             file: f.file.clone(),
             cfg: ControlFlowGraph {
-                blocks: HashMap::new(),
+                blocks: BTreeMap::new(),
                 entry: BasicBlockId(0), // Will be updated
                 exits: Vec::new(),
             },
@@ -322,9 +354,9 @@ impl IRBuilder {
                     escaping_values: Vec::new(),
                     stack_allocated_values: Vec::new(),
                     heap_allocated_values: Vec::new(),
-                    value_lifetimes: HashMap::new(),
-                    escape_reasons: HashMap::new(),
-                    capture_sets: HashMap::new(),
+                    value_lifetimes: BTreeMap::new(),
+                    escape_reasons: BTreeMap::new(),
+                    capture_sets: BTreeMap::new(),
                 },
             },
             optimization_hints: crate::ir::OptimizationHints {
@@ -555,7 +587,7 @@ impl IRBuilder {
     }
 
     fn build_cfg(&self, basic_blocks: &[BasicBlock]) -> ControlFlowGraph {
-        let mut blocks = HashMap::new();
+        let mut blocks = BTreeMap::new();
         let mut entry = BasicBlockId(0);
         let mut exits = Vec::new();
 
@@ -649,10 +681,10 @@ pub struct FunctionBuilder<'a> {
     // SSA state
     current_block: BasicBlockId,
     pub entry_block: BasicBlockId,
-    blocks: HashMap<BasicBlockId, BasicBlock>,
+    blocks: BTreeMap<BasicBlockId, BasicBlock>,
 
     // Variable → SSA value mapping
-    bindings: HashMap<usize, ValueId>,
+    bindings: BTreeMap<usize, ValueId>,
 
     // CFG tracking
     cfg_edges: Vec<(BasicBlockId, BasicBlockId)>,
@@ -670,7 +702,7 @@ pub struct LoopContext {
 impl<'a> FunctionBuilder<'a> {
     fn new(builder: &'a mut IRBuilder, function_id: FunctionId) -> Self {
         let entry_block = builder.fresh_block_id();
-        let mut blocks = HashMap::new();
+        let mut blocks = BTreeMap::new();
         blocks.insert(entry_block, BasicBlock::new(entry_block));
 
         Self {
@@ -679,7 +711,7 @@ impl<'a> FunctionBuilder<'a> {
             current_block: entry_block,
             entry_block,
             blocks,
-            bindings: HashMap::new(),
+            bindings: BTreeMap::new(),
             cfg_edges: Vec::new(),
             loop_stack: Vec::new(),
         }

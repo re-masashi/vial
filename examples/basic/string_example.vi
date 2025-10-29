@@ -1,22 +1,19 @@
-// Basic string operations example
-def pub main() -> int {
-    let greeting = "Hello";
-    let name = " World";
-    
-    // String concatenation (if supported) or just variable usage
-    let message = greeting;  // Using greeting for the message
-    let target = name;       // Using name as target
-    
-    // More string variables
-    let lang = "Vial";
-    let exclamation = "!";
-    
-    // Length could be calculated if there's a method, otherwise just using the values
-    // For now, returning a simple calculation based on the example structure
-    let str_len_approx = 5; // Length of "Hello"
-    let name_len_approx = 6; // Length of " World"
-    
-    // Return an integer result (since main needs to return int)
-    // Using character count approximations
-    str_len_approx + name_len_approx + 4 + 1  // "Vial" = 4, "!" = 1
-}
+let greeting = "Hello";
+let name = " World";
+
+// String concatenation (if supported) or just variable usage
+let message = greeting;  // Using greeting for the message
+let target = name;       // Using name as target
+
+// More string variables
+let lang = "Vial";
+let exclamation = "!";
+
+// Length could be calculated if there's a method, otherwise just using the values
+// For now, returning a simple calculation based on the example structure
+let str_len_approx = 5; // Length of "Hello"
+let name_len_approx = 6; // Length of " World"
+
+// Return an integer result (since main needs to return int)
+// Using character count approximations
+str_len_approx + name_len_approx + 4 + 1  // "Vial" = 4, "!" = 1

@@ -10,6 +10,4 @@ def divide(x: int, y: int) -> int effects Error {
     x / y
 }
 
-def pub main() -> int {
-    0
-}
+0

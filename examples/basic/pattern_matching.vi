@@ -1,32 +1,29 @@
-// Pattern matching example
-def pub main() -> int {
-    // Using if-let for pattern matching (if supported)
-    let x = 42;
-    
-    // Simple conditional that acts like pattern matching
-    let result = if x == 42 {
-        100
-    } else if x == 0 {
-        0
+// Using if-let for pattern matching (if supported)
+let x = 42;
+
+// Simple conditional that acts like pattern matching
+let result = if x == 42 {
+    100
+} else if x == 0 {
+    0
+} else {
+    -1
+};
+
+// Another pattern matching example with tuples (simulated)
+// Since Vial supports tuples, we'll create a tuple-like behavior
+let pair_first = 10;
+let pair_second = 20;
+
+// Simulating tuple pattern matching
+let processed = if pair_first > 5 {
+    if pair_second < 25 {
+        pair_first + pair_second
     } else {
-        -1
-    };
-    
-    // Another pattern matching example with tuples (simulated)
-    // Since Vial supports tuples, we'll create a tuple-like behavior
-    let pair_first = 10;
-    let pair_second = 20;
-    
-    // Simulating tuple pattern matching
-    let processed = if pair_first > 5 {
-        if pair_second < 25 {
-            pair_first + pair_second
-        } else {
-            pair_first - pair_second
-        }
-    } else {
-        0
-    };
-    
-    result + processed
-}
+        pair_first - pair_second
+    }
+} else {
+    0
+};
+
+result + processed

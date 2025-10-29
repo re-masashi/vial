@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::ops::Range;
 
 use crate::ast::{AssignOp, BinOp, Kind, UnOp, Visibility};
@@ -23,16 +23,16 @@ pub enum MemoryKind {
 }
 
 // Unique IDs for IR elements
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FunctionId(pub usize);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct StructId(pub usize);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EnumId(pub usize);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EffectId(pub usize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -41,10 +41,10 @@ pub struct VariantId(pub usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FieldId(pub usize);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct BasicBlockId(pub usize);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct ValueId(pub usize);
 
 // Target information for cross-platform compilation
@@ -292,11 +292,11 @@ pub struct IRModule {
     pub enums: Vec<IREnum>,
     pub effects: Vec<IREffect>,
 
-    // Maps for quick lookups by ID
-    pub function_map: HashMap<FunctionId, usize>,
-    pub struct_map: HashMap<StructId, usize>,
-    pub enum_map: HashMap<EnumId, usize>,
-    pub effect_map: HashMap<EffectId, usize>,
+    // Maps for quick lookups by ID - using BTreeMap for deterministic ordering
+    pub function_map: BTreeMap<FunctionId, usize>,
+    pub struct_map: BTreeMap<StructId, usize>,
+    pub enum_map: BTreeMap<EnumId, usize>,
+    pub effect_map: BTreeMap<EffectId, usize>,
 
     // ADD THIS
     pub target: TargetInfo, // Target architecture info
@@ -309,10 +309,10 @@ impl IRModule {
             structs: Vec::new(),
             enums: Vec::new(),
             effects: Vec::new(),
-            function_map: HashMap::new(),
-            struct_map: HashMap::new(),
-            enum_map: HashMap::new(),
-            effect_map: HashMap::new(),
+            function_map: BTreeMap::new(),
+            struct_map: BTreeMap::new(),
+            enum_map: BTreeMap::new(),
+            effect_map: BTreeMap::new(),
             target,
         }
     }
@@ -895,7 +895,7 @@ pub struct IRFunction {
 
 #[derive(Debug, Clone)]
 pub struct ControlFlowGraph {
-    pub blocks: HashMap<BasicBlockId, BasicBlockInfo>,
+    pub blocks: BTreeMap<BasicBlockId, BasicBlockInfo>,
     pub entry: BasicBlockId,
     pub exits: Vec<BasicBlockId>,
 }
@@ -944,10 +944,10 @@ pub struct EscapeAnalysisInfo {
     pub stack_allocated_values: Vec<ValueId>,
     pub heap_allocated_values: Vec<ValueId>,
 
-    // Analysis data
-    pub value_lifetimes: HashMap<ValueId, Lifetime>,
-    pub escape_reasons: HashMap<ValueId, EscapeReason>,
-    pub capture_sets: HashMap<ValueId, Vec<ValueId>>, // For closures
+    // Analysis data - using BTreeMap for deterministic ordering
+    pub value_lifetimes: BTreeMap<ValueId, Lifetime>,
+    pub escape_reasons: BTreeMap<ValueId, EscapeReason>,
+    pub capture_sets: BTreeMap<ValueId, Vec<ValueId>>, // For closures
 }
 
 #[derive(Debug, Clone)]

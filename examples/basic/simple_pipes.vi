@@ -11,13 +11,11 @@ def square(x: int) -> int {
     x * x
 }
 
-def pub main() -> int {
-    // Test basic pipe: value |> function
-    // This should be equivalent to: double(5)
-    let result1 = 5 |> double;
-    
-    // Test chain: 3 |> double |> square should be square(double(3)) = square(6) = 36
-    let result2 = 3 |> double |> square;
-    
-    result1 + result2  // 10 + 36 = 46
-}
+// Test basic pipe: value |> function
+// This should be equivalent to: double(5)
+let result1 = 5 |> double;
+
+// Test chain: 3 |> double |> square should be square(double(3)) = square(6) = 36
+let result2 = 3 |> double |> square;
+
+result1 + result2  // 10 + 36 = 46

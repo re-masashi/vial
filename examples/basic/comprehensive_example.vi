@@ -1,35 +1,32 @@
-// Comprehensive example combining multiple features
-def pub main() -> int {
-    // Variables and arithmetic
-    let x = 15;
-    let y = 10;
-    
-    // Conditional expressions
-    let max_val = if x > y {
-        x
-    } else {
-        y
-    };
-    
-    // More complex conditional with logical operators
-    let in_range = if max_val > 5 and max_val < 20 {
-        1
-    } else {
-        0
-    };
-    
-    // String example (using variables to simulate)
-    let greeting_len = 5;  // Length of "Hello"
-    let name_len = 6;      // Length of "World!"
-    
-    // Simulated loop behavior using conditionals
-    let counter = 0;
-    let counter = if counter < 5 { counter + 1 } else { counter };
-    let counter = if counter < 5 { counter + 1 } else { counter };
-    let counter = if counter < 5 { counter + 1 } else { counter };
-    let counter = if counter < 5 { counter + 1 } else { counter };
-    let counter = if counter < 5 { counter + 1 } else { counter };
-    
-    // Return a combination of all operations
-    max_val + in_range + greeting_len + name_len + counter
-}
+// Variables and arithmetic
+let x = 15;
+let y = 10;
+
+// Conditional expressions
+let max_val = if x > y {
+    x
+} else {
+    y
+};
+
+// More complex conditional with logical operators
+let in_range = if max_val > 5 and max_val < 20 {
+    1
+} else {
+    0
+};
+
+// String example (using variables to simulate)
+let greeting_len = 5;  // Length of "Hello"
+let name_len = 6;      // Length of "World!"
+
+// Simulated loop behavior using conditionals
+let counter = 0;
+let counter = if counter < 5 { counter + 1 } else { counter };
+let counter = if counter < 5 { counter + 1 } else { counter };
+let counter = if counter < 5 { counter + 1 } else { counter };
+let counter = if counter < 5 { counter + 1 } else { counter };
+let counter = if counter < 5 { counter + 1 } else { counter };
+
+// Return a combination of all operations
+max_val + in_range + greeting_len + name_len + counter

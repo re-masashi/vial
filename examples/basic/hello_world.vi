@@ -1,4 +1,2 @@
-// Basic Hello World example
-def pub main() -> int {
-    42  // Return a simple value
-}
+// Basic Hello World example - Top level expressions are executed directly
+42  // Return a simple value

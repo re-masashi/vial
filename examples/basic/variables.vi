@@ -1,11 +1,8 @@
-// Basic variable declarations and operations
-def pub main() -> int {
-    let x = 42;
-    let y = 100;
-    
-    let sum = x + y;
-    let product = x * y;
-    
-    // Return the sum
-    sum
-}
+let x = 42;
+let y = 100;
+
+let sum = x + y;
+let product = x * y;
+
+// Return the sum
+sum

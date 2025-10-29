@@ -66,7 +66,10 @@ pub fn pretty_dump_bytecode(
     result
 }
 
-fn decode_instruction_at(bytecode: &[u8], offset: usize) -> Result<DecodedInstruction, String> {
+pub(super) fn decode_instruction_at(
+    bytecode: &[u8],
+    offset: usize,
+) -> Result<DecodedInstruction, String> {
     if offset >= bytecode.len() {
         return Err("End of bytecode".to_string());
     }

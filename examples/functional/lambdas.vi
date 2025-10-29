@@ -1,10 +1,7 @@
-// Lambda functions example
-def pub main() -> int {
-    let double = fn(x) x * 2;
-    let add = fn(a, b) a + b;
-    
-    let result1 = double(5);      // 10
-    let result2 = add(3, 4);      // 7
-    
-    result1 + result2  // 17
-}
+let double = fn(x) x * 2;
+let add = fn(a, b) a + b;
+
+let result1 = double(5);      // 10
+let result2 = add(3, 4);      // 7
+
+result1 + result2  // 17

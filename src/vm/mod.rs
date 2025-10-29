@@ -1,6 +1,7 @@
 pub const REGISTER_COUNT: usize = 256;
 
 pub mod disassembler;
+pub mod executor;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]
@@ -415,6 +416,7 @@ impl StackMapEntry {
 }
 
 #[repr(C)]
+#[derive(Debug, Clone)]
 pub struct StructLayout {
     pub size: u32,
     pub alignment: u16,
@@ -422,6 +424,7 @@ pub struct StructLayout {
 }
 
 #[repr(C)]
+#[derive(Debug, Clone)]
 pub struct EnumLayout {
     pub size: u32,
     pub alignment: u16,
@@ -431,7 +434,7 @@ pub struct EnumLayout {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct VariantLayout {
     pub discriminant: u32,
     pub gc_ptr_offsets_start: u16, // Index into shared array

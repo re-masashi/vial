@@ -5,7 +5,7 @@ use crate::ir::{
     TrapKind, ValueId, VariantId,
 };
 use crate::vm::{EnumLayout, FunctionMetadata, StructLayout, VariantLayout};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 pub struct BytecodeCompiler {
     bytecode: Vec<u8>,
@@ -13,8 +13,8 @@ pub struct BytecodeCompiler {
     function_metadata: Vec<FunctionMetadata>,
     stack_maps: Vec<u8>,
 
-    // For tracking function bytecode offsets
-    function_offsets: HashMap<FunctionId, usize>,
+    // For tracking function bytecode offsets - using BTreeMap for deterministic ordering
+    function_offsets: BTreeMap<FunctionId, usize>,
 
     // For register allocation
     next_register: u8,
@@ -48,7 +48,7 @@ impl BytecodeCompiler {
             constant_pool: Vec::new(),
             function_metadata: Vec::new(),
             stack_maps: Vec::new(),
-            function_offsets: HashMap::new(),
+            function_offsets: BTreeMap::new(), // Changed from BTreeMap::new()
             next_register: 0,
             current_stack_map_offset: 0,
             ir_module: None,
@@ -66,7 +66,7 @@ impl BytecodeCompiler {
             self.function_offsets.insert(func.id, current_offset);
         }
 
-        // Compile each function
+        // Compile each function in deterministic order (already sorted in IR)
         for func in &module.functions {
             let mut reg_alloc = self.linear_scan_register_allocation(func);
             self.compile_function(func, &mut reg_alloc);
@@ -181,8 +181,8 @@ impl BytecodeCompiler {
     }
 
     // Linear scan register allocation
-    fn linear_scan_register_allocation(&mut self, func: &IRFunction) -> HashMap<ValueId, u8> {
-        let mut reg_alloc = HashMap::new();
+    fn linear_scan_register_allocation(&mut self, func: &IRFunction) -> BTreeMap<ValueId, u8> {
+        let mut reg_alloc = BTreeMap::new();
 
         // Start with argument mapping
         for (i, arg) in func.args.iter().take(8).enumerate() {
@@ -247,7 +247,7 @@ impl BytecodeCompiler {
     }
 
     // Find next available register
-    fn next_available_register(&mut self, used_regs: &HashMap<ValueId, u8>) -> u8 {
+    fn next_available_register(&mut self, used_regs: &BTreeMap<ValueId, u8>) -> u8 {
         loop {
             let reg = self.next_register;
             self.next_register += 1;
@@ -266,7 +266,7 @@ impl BytecodeCompiler {
     }
 
     // Compile a single function
-    fn compile_function(&mut self, func: &IRFunction, reg_alloc: &mut HashMap<ValueId, u8>) {
+    fn compile_function(&mut self, func: &IRFunction, reg_alloc: &mut BTreeMap<ValueId, u8>) {
         let bytecode_start = self.bytecode.len();
 
         // Save the function offset
@@ -278,7 +278,7 @@ impl BytecodeCompiler {
         let arg_count = func.args.len().min(8) as u8; // Max 8 args in registers R1-R8
 
         // First pass: collect basic block offsets by emitting bytecode
-        let mut block_offsets: HashMap<BasicBlockId, usize> = HashMap::new();
+        let mut block_offsets: BTreeMap<BasicBlockId, usize> = BTreeMap::new();
 
         for block in &func.basic_blocks {
             block_offsets.insert(block.id, self.bytecode.len());
@@ -318,7 +318,7 @@ impl BytecodeCompiler {
     }
 
     // Emit a single IR instruction
-    fn emit_instruction(&mut self, inst: &IRInstruction, reg_alloc: &HashMap<ValueId, u8>) {
+    fn emit_instruction(&mut self, inst: &IRInstruction, reg_alloc: &BTreeMap<ValueId, u8>) {
         match inst {
             IRInstruction::BinOp {
                 result,
@@ -1358,10 +1358,9 @@ impl BytecodeCompiler {
                 // For now, no-op in GC system
             }
             IRInstruction::MemoryCopy { .. } => {
-                // For memory copy, emit opcodes that might be expected by the test
-                // The test is looking for opcodes 0x80 or 0x81 (StructNew or EnumNew)
-                // This could be because memory copy operations get lowered to structure operations
-                self.emit_u8(0x80); // StructNew - for memory copy test
+                // For memory copy, we need to implement proper memory copy
+                // For now, emit a trap to indicate unimplemented operation
+                self.emit_u8(0xF5); // DebugTrap - memory copy not implemented yet
             }
             IRInstruction::ConstructClosure {
                 result,
@@ -1596,7 +1595,7 @@ impl BytecodeCompiler {
     }
 
     // Get GC pointer registers from the register allocation
-    fn get_gc_pointer_registers(&self, reg_alloc: &HashMap<ValueId, u8>) -> Vec<u8> {
+    fn get_gc_pointer_registers(&self, reg_alloc: &BTreeMap<ValueId, u8>) -> Vec<u8> {
         // In a real implementation, we'd identify which ValueIds correspond to GC pointer types
         // and return the associated registers
         let mut gc_regs = Vec::new();
@@ -1617,7 +1616,7 @@ impl BytecodeCompiler {
     }
 
     // Check if a register contains a GC pointer
-    fn is_gc_pointer_register(&self, reg: u8, reg_alloc: &HashMap<ValueId, u8>) -> bool {
+    fn is_gc_pointer_register(&self, reg: u8, reg_alloc: &BTreeMap<ValueId, u8>) -> bool {
         // Find the ValueId associated with this register
         if let Some(&value_id) = reg_alloc
             .iter()
@@ -1742,7 +1741,7 @@ impl BytecodeCompiler {
         &mut self,
         predecessor_block_id: BasicBlockId,
         target_block_id: BasicBlockId,
-        reg_alloc: &HashMap<ValueId, u8>,
+        reg_alloc: &BTreeMap<ValueId, u8>,
         func: &IRFunction,
     ) {
         // Find the target block
@@ -1781,8 +1780,8 @@ impl BytecodeCompiler {
     fn emit_terminator(
         &mut self,
         term: &IRTerminator,
-        reg_alloc: &HashMap<ValueId, u8>,
-        block_offsets: &HashMap<BasicBlockId, usize>,
+        reg_alloc: &BTreeMap<ValueId, u8>,
+        block_offsets: &BTreeMap<BasicBlockId, usize>,
         current_block_id: BasicBlockId, // Add current block ID for PHI handling
         func: &IRFunction,              // Add function for accessing blocks
     ) {
@@ -2025,7 +2024,7 @@ impl BytecodeCompiler {
     }
 
     // Helper to get register for a value (handles immediate values too)
-    fn get_register_for_value(&mut self, value: &IRValue, reg_alloc: &HashMap<ValueId, u8>) -> u8 {
+    fn get_register_for_value(&mut self, value: &IRValue, reg_alloc: &BTreeMap<ValueId, u8>) -> u8 {
         match value {
             IRValue::SSA(id) => *reg_alloc.get(id).unwrap_or(&0),
             IRValue::Int(val) => {
@@ -2288,7 +2287,7 @@ mod tests {
             },
             basic_blocks: vec![block],
             cfg: crate::ir::ControlFlowGraph {
-                blocks: std::collections::HashMap::new(),
+                blocks: std::collections::BTreeMap::new(),
                 entry: crate::ir::BasicBlockId(0),
                 exits: vec![],
             },
@@ -2302,9 +2301,9 @@ mod tests {
                     escaping_values: vec![],
                     stack_allocated_values: vec![],
                     heap_allocated_values: vec![],
-                    value_lifetimes: std::collections::HashMap::new(),
-                    escape_reasons: std::collections::HashMap::new(),
-                    capture_sets: std::collections::HashMap::new(),
+                    value_lifetimes: std::collections::BTreeMap::new(),
+                    escape_reasons: std::collections::BTreeMap::new(),
+                    capture_sets: std::collections::BTreeMap::new(),
                 },
             },
             optimization_hints: crate::ir::OptimizationHints {
@@ -2403,7 +2402,7 @@ mod tests {
             },
             basic_blocks: vec![block],
             cfg: crate::ir::ControlFlowGraph {
-                blocks: std::collections::HashMap::new(),
+                blocks: std::collections::BTreeMap::new(),
                 entry: crate::ir::BasicBlockId(0),
                 exits: vec![],
             },
@@ -2417,9 +2416,9 @@ mod tests {
                     escaping_values: vec![],
                     stack_allocated_values: vec![],
                     heap_allocated_values: vec![],
-                    value_lifetimes: std::collections::HashMap::new(),
-                    escape_reasons: std::collections::HashMap::new(),
-                    capture_sets: std::collections::HashMap::new(),
+                    value_lifetimes: std::collections::BTreeMap::new(),
+                    escape_reasons: std::collections::BTreeMap::new(),
+                    capture_sets: std::collections::BTreeMap::new(),
                 },
             },
             optimization_hints: crate::ir::OptimizationHints {
@@ -2511,7 +2510,7 @@ mod tests {
             },
             basic_blocks: vec![block],
             cfg: crate::ir::ControlFlowGraph {
-                blocks: std::collections::HashMap::new(),
+                blocks: std::collections::BTreeMap::new(),
                 entry: crate::ir::BasicBlockId(0),
                 exits: vec![],
             },
@@ -2525,9 +2524,9 @@ mod tests {
                     escaping_values: vec![],
                     stack_allocated_values: vec![],
                     heap_allocated_values: vec![],
-                    value_lifetimes: std::collections::HashMap::new(),
-                    escape_reasons: std::collections::HashMap::new(),
-                    capture_sets: std::collections::HashMap::new(),
+                    value_lifetimes: std::collections::BTreeMap::new(),
+                    escape_reasons: std::collections::BTreeMap::new(),
+                    capture_sets: std::collections::BTreeMap::new(),
                 },
             },
             optimization_hints: crate::ir::OptimizationHints {
@@ -2676,7 +2675,7 @@ mod tests {
             },
             basic_blocks: vec![block0, block1, block2],
             cfg: crate::ir::ControlFlowGraph {
-                blocks: std::collections::HashMap::new(),
+                blocks: std::collections::BTreeMap::new(),
                 entry: crate::ir::BasicBlockId(0),
                 exits: vec![],
             },
@@ -2690,9 +2689,9 @@ mod tests {
                     escaping_values: vec![],
                     stack_allocated_values: vec![],
                     heap_allocated_values: vec![],
-                    value_lifetimes: std::collections::HashMap::new(),
-                    escape_reasons: std::collections::HashMap::new(),
-                    capture_sets: std::collections::HashMap::new(),
+                    value_lifetimes: std::collections::BTreeMap::new(),
+                    escape_reasons: std::collections::BTreeMap::new(),
+                    capture_sets: std::collections::BTreeMap::new(),
                 },
             },
             optimization_hints: crate::ir::OptimizationHints {
@@ -2777,7 +2776,7 @@ mod tests {
             },
             basic_blocks: vec![block],
             cfg: crate::ir::ControlFlowGraph {
-                blocks: std::collections::HashMap::new(),
+                blocks: std::collections::BTreeMap::new(),
                 entry: crate::ir::BasicBlockId(0),
                 exits: vec![],
             },
@@ -2791,9 +2790,9 @@ mod tests {
                     escaping_values: vec![],
                     stack_allocated_values: vec![],
                     heap_allocated_values: vec![],
-                    value_lifetimes: std::collections::HashMap::new(),
-                    escape_reasons: std::collections::HashMap::new(),
-                    capture_sets: std::collections::HashMap::new(),
+                    value_lifetimes: std::collections::BTreeMap::new(),
+                    escape_reasons: std::collections::BTreeMap::new(),
+                    capture_sets: std::collections::BTreeMap::new(),
                 },
             },
             optimization_hints: crate::ir::OptimizationHints {
@@ -2916,7 +2915,7 @@ mod tests {
             },
             basic_blocks: vec![block],
             cfg: crate::ir::ControlFlowGraph {
-                blocks: std::collections::HashMap::new(),
+                blocks: std::collections::BTreeMap::new(),
                 entry: crate::ir::BasicBlockId(0),
                 exits: vec![],
             },
@@ -2930,9 +2929,9 @@ mod tests {
                     escaping_values: vec![],
                     stack_allocated_values: vec![],
                     heap_allocated_values: vec![],
-                    value_lifetimes: std::collections::HashMap::new(),
-                    escape_reasons: std::collections::HashMap::new(),
-                    capture_sets: std::collections::HashMap::new(),
+                    value_lifetimes: std::collections::BTreeMap::new(),
+                    escape_reasons: std::collections::BTreeMap::new(),
+                    capture_sets: std::collections::BTreeMap::new(),
                 },
             },
             optimization_hints: crate::ir::OptimizationHints {
@@ -3029,7 +3028,7 @@ mod tests {
             },
             basic_blocks: vec![block],
             cfg: crate::ir::ControlFlowGraph {
-                blocks: std::collections::HashMap::new(),
+                blocks: std::collections::BTreeMap::new(),
                 entry: crate::ir::BasicBlockId(0),
                 exits: vec![],
             },
@@ -3043,9 +3042,9 @@ mod tests {
                     escaping_values: vec![],
                     stack_allocated_values: vec![],
                     heap_allocated_values: vec![],
-                    value_lifetimes: std::collections::HashMap::new(),
-                    escape_reasons: std::collections::HashMap::new(),
-                    capture_sets: std::collections::HashMap::new(),
+                    value_lifetimes: std::collections::BTreeMap::new(),
+                    escape_reasons: std::collections::BTreeMap::new(),
+                    capture_sets: std::collections::BTreeMap::new(),
                 },
             },
             optimization_hints: crate::ir::OptimizationHints {
@@ -3157,7 +3156,7 @@ mod tests {
             },
             basic_blocks: vec![block],
             cfg: crate::ir::ControlFlowGraph {
-                blocks: std::collections::HashMap::new(),
+                blocks: std::collections::BTreeMap::new(),
                 entry: crate::ir::BasicBlockId(0),
                 exits: vec![],
             },
@@ -3171,9 +3170,9 @@ mod tests {
                     escaping_values: vec![],
                     stack_allocated_values: vec![],
                     heap_allocated_values: vec![],
-                    value_lifetimes: std::collections::HashMap::new(),
-                    escape_reasons: std::collections::HashMap::new(),
-                    capture_sets: std::collections::HashMap::new(),
+                    value_lifetimes: std::collections::BTreeMap::new(),
+                    escape_reasons: std::collections::BTreeMap::new(),
+                    capture_sets: std::collections::BTreeMap::new(),
                 },
             },
             optimization_hints: crate::ir::OptimizationHints {
@@ -3189,12 +3188,11 @@ mod tests {
         let mut compiler = BytecodeCompiler::new();
         let compiled = compiler.compile_module(&module);
 
-        // Verify that the bytecode contains memory copy instructions
-        // Either MemCopy or MemCopyImm should be present
-        let has_mem_copy = compiled.bytecode.contains(&0x81) || compiled.bytecode.contains(&0x80);
+        // Verify that the bytecode contains a DebugTrap instruction (F5) from the unimplemented MemoryCopy
+        let has_debug_trap = compiled.bytecode.contains(&0xF5);
         assert!(
-            has_mem_copy,
-            "Bytecode should contain memory copy instruction"
+            has_debug_trap,
+            "Bytecode should contain DebugTrap (0xF5) instruction for unimplemented MemoryCopy"
         );
     }
 }

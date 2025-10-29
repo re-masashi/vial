@@ -18,25 +18,23 @@ def compose(f: fn(int) -> int, g: fn(int) -> int) -> fn(int) -> int {
     fn(x) g(f(x))
 }
 
-def pub main() -> int {
-    // Instead of using pipes (x |> f |> g), we use function composition and direct calls
-    // The pipe operator x |> f is conceptually equivalent to f(x)
-    // So x |> f |> g would be equivalent to g(f(x))
-    
-    // Direct function application (equivalent to: 5 |> double)
-    let result1 = double(5);  // 10
-    
-    // Chained function application (equivalent to: 3 |> double |> square)
-    let result2 = square(double(3));  // square(6) = 36
-    
-    // We can define a helper that mimics the pipe behavior
-    let apply_double_then_square = compose(double, square);
-    let result3 = apply_double_then_square(4);  // square(double(4)) = square(8) = 64
-    
-    // More complex composition
-    let temp1 = double(7);      // 14
-    let temp2 = square(temp1);  // square(14) = 196
-    let result4 = add(temp2, 4); // add(196, 4) = 200
-    
-    result1 + result2 + result3 + result4
-}
+// Instead of using pipes (x |> f |> g), we use function composition and direct calls
+// The pipe operator x |> f is conceptually equivalent to f(x)
+// So x |> f |> g would be equivalent to g(f(x))
+
+// Direct function application (equivalent to: 5 |> double)
+let result1 = double(5);  // 10
+
+// Chained function application (equivalent to: 3 |> double |> square)
+let result2 = square(double(3));  // square(6) = 36
+
+// We can define a helper that mimics the pipe behavior
+let apply_double_then_square = compose(double, square);
+let result3 = apply_double_then_square(4);  // square(double(4)) = square(8) = 64
+
+// More complex composition
+let temp1 = double(7);      // 14
+let temp2 = square(temp1);  // square(14) = 196
+let result4 = add(temp2, 4); // add(196, 4) = 200
+
+result1 + result2 + result3 + result4

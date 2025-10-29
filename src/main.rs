@@ -135,6 +135,12 @@ fn main() {
         vial::ir::builder::IRBuilder::new(vial::ir::TargetInfo::vm_target(), final_interner);
     let ir_module = ir_builder.lower_program(monomorphized_ast);
 
+    // Add IR dump option
+    if args.contains(&"--ir-dump".to_string()) || args.contains(&"-i".to_string()) {
+        println!("\n[IR Dump]");
+        println!("{:#?}", ir_module);
+    }
+
     println!("[Code Generation] Compiling to bytecode...");
     let mut compiler = vial::compiler::BytecodeCompiler::new();
     let compiled_bytecode = compiler.compile_module(&ir_module);
@@ -154,7 +160,26 @@ fn main() {
 
     println!("\n✓ Compilation successful!");
     println!("  File: {}", filename);
-    if args.contains(&"--debug".to_string()) || args.contains(&"-d".to_string()) {
+
+    // Add VM execution
+    if args.contains(&"--execute".to_string()) || args.contains(&"-e".to_string()) {
+        println!("[VM Execution] Starting execution...");
+        match vial::vm::executor::run_bytecode(
+            &compiled_bytecode.bytecode,
+            &compiled_bytecode.function_metadata,
+            Some(&compiled_bytecode.constant_pool),
+            Some(&compiled_bytecode.struct_layouts),
+            Some(&compiled_bytecode.enum_layouts),
+        ) {
+            Ok(result) => {
+                println!("[VM Execution] Program exited with code: {}", result);
+            }
+            Err(e) => {
+                eprintln!("[VM Execution] Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+    } else if args.contains(&"--debug".to_string()) || args.contains(&"-d".to_string()) {
         // Use the disassembler to format the bytecode
         let disassembly = vial::vm::disassembler::pretty_dump_bytecode(
             &compiled_bytecode.bytecode,
@@ -169,7 +194,7 @@ fn main() {
     }
     println!("\nNext steps:");
     println!("  - TODO: Optimization passes");
-    println!("  - TODO: VM execution");
+    println!("  - Run with --execute or -e to execute the program");
 }
 
 fn report_parse_errors(

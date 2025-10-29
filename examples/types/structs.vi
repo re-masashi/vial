@@ -8,7 +8,5 @@ def create_point(x: int, y: int) -> Point {
     Point { x: x, y: y }
 }
 
-def pub main() -> int {
-    let point = create_point(3, 4);
-    point.x + point.y  // 7
-}
+let point = create_point(3, 4);
+point.x + point.y  // 7
