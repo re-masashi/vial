@@ -47,6 +47,7 @@ impl Monomorphizer {
                         continue; // Don't add to result yet
                     } else {
                         // Non-generic function - keep it and monomorphize body
+                        // Apply substitution to resolve any type variables
                         let mono_func = self.monomorphize_function_body(*func);
                         result.push(TypedASTNode {
                             span: node.span,
@@ -565,6 +566,19 @@ impl Monomorphizer {
                     .map(|(n, id, t)| (*n, *id, subst.apply(t)))
                     .collect(),
                 function_type: subst.apply(function_type),
+            },
+
+            TypedExprKind::Perform {
+                effect,
+                effect_id,
+                args,
+            } => TypedExprKind::Perform {
+                effect: *effect,
+                effect_id: *effect_id,
+                args: args
+                    .iter()
+                    .map(|a| self.substitute_expr_with_subst(a, subst))
+                    .collect(),
             },
 
             other => other.clone(),

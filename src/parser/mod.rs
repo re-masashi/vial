@@ -101,7 +101,7 @@ fn type_annot<'src>()
             .then(
                 select! { Token::Variable(s) if s == "effects" => () }
                     .ignore_then(ident().separated_by(just(Token::Comma)).collect::<Vec<_>>())
-                    .map(EffectAnnot::closed)
+                    .map(|effects: Vec<String>| EffectAnnot::closed_simple(effects))
                     .or_not(),
             )
             .map(|((params, ret), effects)| TypeAnnotKind::Function {
@@ -1314,7 +1314,7 @@ fn function<'src>()
         .then(
             select! { Token::Variable(s) if s == "effects" => () }
                 .ignore_then(ident().separated_by(just(Token::Comma)).collect::<Vec<_>>())
-                .map(EffectAnnot::closed)
+                .map(|effects: Vec<String>| EffectAnnot::closed_simple(effects))
                 .or_not(),
         )
         .then(where_clause().or_not())
@@ -1680,7 +1680,7 @@ fn function_in_impl<'src>()
         .then(
             select! { Token::Variable(s) if s == "effects" => () }
                 .ignore_then(ident().separated_by(just(Token::Comma)).collect::<Vec<_>>())
-                .map(EffectAnnot::closed)
+                .map(|effects: Vec<String>| EffectAnnot::closed_simple(effects))
                 .or_not(),
         )
         .then(where_clause().or_not())
@@ -1762,7 +1762,7 @@ fn function_decl<'src>()
         .then(
             select! { Token::Variable(s) if s == "effects" => () }
                 .ignore_then(ident().separated_by(just(Token::Comma)).collect::<Vec<_>>())
-                .map(EffectAnnot::closed)
+                .map(|effects: Vec<String>| EffectAnnot::closed_simple(effects))
                 .or_not(),
         )
         .then(where_clause().or_not())

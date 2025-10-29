@@ -27,14 +27,14 @@ pub enum ASTNodeKind {
     Error,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TypeAnnot {
     pub span: Range<usize>,
     pub file: String,
     pub type_: TypeAnnotKind,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TypeAnnotKind {
     // Primitives
     Bool,
@@ -112,10 +112,10 @@ pub enum KindAnnot {
 }
 
 // Effect annotations
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EffectAnnot {
-    pub effects: Vec<String>, // IO, State, Exn, etc.
-    pub rest: Option<String>, // todo
+    pub effects: Vec<(String, Vec<TypeAnnot>)>, // (effect_name, type_args) - empty vec means simple effect
+    pub rest: Option<String>,                   // todo
 }
 
 impl EffectAnnot {
@@ -126,16 +126,30 @@ impl EffectAnnot {
         }
     }
 
-    pub fn closed(effects: Vec<String>) -> Self {
+    pub fn closed(effects: Vec<(String, Vec<TypeAnnot>)>) -> Self {
         Self {
             effects,
             rest: None,
         }
     }
 
-    pub fn open(effects: Vec<String>, rest: String) -> Self {
+    pub fn closed_simple(effects: Vec<String>) -> Self {
+        Self {
+            effects: effects.into_iter().map(|name| (name, vec![])).collect(),
+            rest: None,
+        }
+    }
+
+    pub fn open(effects: Vec<(String, Vec<TypeAnnot>)>, rest: String) -> Self {
         Self {
             effects,
+            rest: Some(rest),
+        }
+    }
+
+    pub fn open_simple(effects: Vec<String>, rest: String) -> Self {
+        Self {
+            effects: effects.into_iter().map(|name| (name, vec![])).collect(),
             rest: Some(rest),
         }
     }
@@ -1263,12 +1277,12 @@ pub mod tests {
         assert_eq!(pure.effects.len(), 0);
         assert_eq!(pure.rest, None);
 
-        let closed = EffectAnnot::closed(vec!["IO".to_string()]);
-        assert_eq!(closed.effects, vec!["IO".to_string()]);
+        let closed = EffectAnnot::closed_simple(vec!["IO".to_string()]);
+        assert_eq!(closed.effects, vec![("IO".to_string(), vec![])]);
         assert_eq!(closed.rest, None);
 
-        let open = EffectAnnot::open(vec!["State".to_string()], "e".to_string());
-        assert_eq!(open.effects, vec!["State".to_string()]);
+        let open = EffectAnnot::open_simple(vec!["State".to_string()], "e".to_string());
+        assert_eq!(open.effects, vec![("State".to_string(), vec![])]);
         assert_eq!(open.rest, Some("e".to_string()));
     }
 

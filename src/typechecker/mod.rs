@@ -479,6 +479,7 @@ pub struct EffectInfo {
     pub id: EffectId,
     pub name: Symbol,
     pub operations: HashMap<Symbol, Rc<Type>>,
+    pub type_params: Vec<(Symbol, TypeId)>, // Store type parameter names and their type variable IDs
 }
 
 impl Default for TypeEnv {
@@ -718,11 +719,44 @@ impl TypeChecker {
     }
 
     fn convert_effect_annot(&mut self, annot: &EffectAnnot) -> EffectSet {
+        // Process each effect in the annotation and create proper substitutions
+        for (effect_name, type_args) in &annot.effects {
+            if !type_args.is_empty() {
+                let effect_sym = self.interner.intern(effect_name);
+
+                // Look up the effect template to get its type parameters
+                // Collect effect info to avoid borrowing issues
+                let effect_info_opt = self
+                    .env
+                    .effects
+                    .values()
+                    .find(|e| e.name == effect_sym)
+                    .cloned();
+
+                if let Some(effect_info) = effect_info_opt {
+                    // Create substitution mapping type parameters to concrete types
+                    for (i, type_arg) in type_args.iter().enumerate() {
+                        if i < effect_info.type_params.len() {
+                            let (_param_name, type_var_id) = effect_info.type_params[i];
+
+                            // Resolve the concrete type argument
+                            let concrete_type = self.resolve_type_annot(type_arg);
+
+                            // Add mapping to current substitution
+                            self.substitution
+                                .map
+                                .insert(TypeId(type_var_id.0), concrete_type);
+                        }
+                    }
+                }
+            }
+        }
+
         EffectSet {
             effects: annot
                 .effects
                 .iter()
-                .map(|e| self.interner.intern(e).0)
+                .map(|(effect_name, _type_args)| self.interner.intern(effect_name).0)
                 .collect(),
             rest: annot.rest.as_ref().map(|r| self.interner.intern(r).0),
         }
@@ -2922,12 +2956,23 @@ impl TypeChecker {
                 }
 
                 if let Some((op_type, effect_id, _effect_info)) = found_operation {
+                    println!("DEBUG: Processing perform operation");
+                    println!("DEBUG: Original op type: {:?}", op_type);
+                    println!(
+                        "DEBUG: Current substitution map: {:?}",
+                        self.substitution.map
+                    );
+
+                    // Apply current substitution to resolve type variables
+                    let substituted_op_type = self.substitution.apply(&op_type);
+                    println!("DEBUG: Substituted op type: {:?}", substituted_op_type);
+
                     // Check that op_type is a function type
                     if let TypeKind::Function {
                         params,
                         return_type,
                         ..
-                    } = &op_type.type_
+                    } = &substituted_op_type.type_
                     {
                         let typed_args: Vec<_> = args.iter().map(|a| self.check_expr(a)).collect();
 
@@ -4637,6 +4682,7 @@ impl TypeChecker {
             id: effect_id,
             name: effect_sym,
             operations: operation_map,
+            type_params: type_params.iter().map(|tp| (tp.name, tp.var_id)).collect(),
         };
         self.env.add_effect(effect_info);
 

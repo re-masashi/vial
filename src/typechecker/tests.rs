@@ -1202,7 +1202,7 @@ fn test_pure_function_calling_effectful_function() {
         args: vec![],
         return_type: None,
         where_constraints: vec![],
-        effects: EffectAnnot::closed(vec!["IO".to_string()]),
+        effects: EffectAnnot::closed_simple(vec!["IO".to_string()]),
         body: None,
     };
 
