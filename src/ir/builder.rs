@@ -648,12 +648,12 @@ impl IRBuilder {
             crate::typechecker::TypeKind::Constructor { name, .. } => {
                 let type_name = self.interner.resolve(Symbol(*name));
                 match type_name {
-                    "Int" | "Bool" | "Float" | "Unit" => MemoryKind::Stack,
-                    "String" => MemoryKind::Heap, // Strings are heap allocated
+                    "int" | "bool" | "float" | "unit" => MemoryKind::Stack,
+                    "string" => MemoryKind::Heap, // Strings are heap allocated
                     "Array" | "List" | "Vec" => MemoryKind::Heap, // Collections are heap allocated
                     _ => {
                         // Structs and enums might be stack or heap depending on size and escape
-                        MemoryKind::Stack // Default to stack, escape analysis will determine final allocation
+                        MemoryKind::Heap // Default to heap, escape analysis will determine final allocation
                     }
                 }
             }
