@@ -815,10 +815,168 @@ impl TypeChecker {
         let _string_sym = interner.intern("string");
         let _unit_sym = interner.intern("unit");
 
+        // Create the ID generator
+        let mut id_gen = IdGen::new();
+
+        // Initialize environment with builtin types (Option, Result)
+        let mut env = TypeEnv::new();
+
+        // Register Option<T> enum
+        let option_id = interner.intern("Option");
+        let _option_type_param_id = interner.intern("T");
+        let option_enum_id = EnumId(option_id.0); // Use the symbol ID as the enum ID
+
+        // Create T type parameter
+        let t_type_var = Rc::new(Type {
+            span: None,
+            file: None,
+            type_: TypeKind::Variable {
+                id: id_gen.fresh_type().0, // Use the local id_gen instead
+                kind: Kind::Star,
+            },
+        });
+
+        // Create Some(T) and None variants
+        let mut variants = std::collections::HashMap::new();
+
+        // Some variant: Some(T)
+        let some_variant_id = id_gen.fresh_variant(); // Use the local id_gen instead
+        variants.insert(
+            interner.intern("Some"),
+            (some_variant_id, vec![t_type_var.clone()]),
+        );
+
+        // None variant: None
+        let none_variant_id = id_gen.fresh_variant(); // Use the local id_gen instead
+        variants.insert(interner.intern("None"), (none_variant_id, vec![]));
+
+        let option_info = EnumInfo {
+            id: option_enum_id,
+            name: option_id,
+            type_params: vec![id_gen.fresh_type()], // T type parameter - use the local id_gen
+            variants,
+        };
+        env.enums.insert(option_enum_id, option_info);
+
+        // Register Result<T, E> enum
+        let result_id = interner.intern("Result");
+        let result_enum_id = EnumId(result_id.0); // Use the symbol ID as the enum ID
+
+        // Create T and E type parameters
+        let t_type_var = Rc::new(Type {
+            span: None,
+            file: None,
+            type_: TypeKind::Variable {
+                id: id_gen.fresh_type().0, // Use the local id_gen instead
+                kind: Kind::Star,
+            },
+        });
+        let e_type_var = Rc::new(Type {
+            span: None,
+            file: None,
+            type_: TypeKind::Variable {
+                id: id_gen.fresh_type().0, // Use the local id_gen instead
+                kind: Kind::Star,
+            },
+        });
+
+        // Create Ok(T) and Err(E) variants
+        let mut result_variants = std::collections::HashMap::new();
+
+        // Ok variant: Ok(T)
+        let ok_variant_id = id_gen.fresh_variant(); // Use the local id_gen instead
+        result_variants.insert(
+            interner.intern("Ok"),
+            (ok_variant_id, vec![t_type_var.clone()]),
+        );
+
+        // Err variant: Err(E)
+        let err_variant_id = id_gen.fresh_variant(); // Use the local id_gen instead
+        result_variants.insert(
+            interner.intern("Err"),
+            (err_variant_id, vec![e_type_var.clone()]),
+        );
+
+        let result_info = EnumInfo {
+            id: result_enum_id,
+            name: result_id,
+            type_params: vec![id_gen.fresh_type(), id_gen.fresh_type()], // T and E type parameters - use the local id_gen
+            variants: result_variants,
+        };
+        env.enums.insert(result_enum_id, result_info);
+
+        // Register builtin functions
+        // print function: takes a string and returns unit
+        let string_kind = Kind::Star;
+        let unit_kind = Kind::Star;
+
+        let print_func_type = Rc::new(Type {
+            span: None,
+            file: None,
+            type_: TypeKind::Function {
+                params: vec![Rc::new(Type {
+                    span: None,
+                    file: None,
+                    type_: TypeKind::Constructor {
+                        name: interner.intern("string").0,
+                        args: vec![],
+                        kind: string_kind.clone(),
+                    },
+                })],
+                return_type: Rc::new(Type {
+                    span: None,
+                    file: None,
+                    type_: TypeKind::Constructor {
+                        name: interner.intern("unit").0,
+                        args: vec![],
+                        kind: unit_kind.clone(),
+                    },
+                }),
+                effects: EffectSet::pure(), // print is pure effect
+            },
+        });
+
+        let print_binding_id = id_gen.fresh_binding();
+        let print_binding = Binding {
+            id: print_binding_id,
+            name: interner.intern("print"),
+            type_: print_func_type,
+            mutable: false,
+        };
+        env.bindings.insert(print_binding_id, print_binding);
+
+        // input function: takes no arguments and returns string
+        let input_func_type = Rc::new(Type {
+            span: None,
+            file: None,
+            type_: TypeKind::Function {
+                params: vec![],
+                return_type: Rc::new(Type {
+                    span: None,
+                    file: None,
+                    type_: TypeKind::Constructor {
+                        name: interner.intern("string").0,
+                        args: vec![],
+                        kind: string_kind,
+                    },
+                }),
+                effects: EffectSet::pure(), // input has side effects but for now consider as pure
+            },
+        });
+
+        let input_binding_id = id_gen.fresh_binding();
+        let input_binding = Binding {
+            id: input_binding_id,
+            name: interner.intern("input"),
+            type_: input_func_type,
+            mutable: false,
+        };
+        env.bindings.insert(input_binding_id, input_binding);
+
         Self {
-            env: TypeEnv::new(),
+            env,
             interner,
-            id_gen: IdGen::new(),
+            id_gen, // Use the id_gen that already has the builtin types registered
             diagnostics: Diagnostics::new(),
             substitution: Substitution::default(),
             constraints: Vec::new(),
@@ -1547,28 +1705,11 @@ impl TypeChecker {
                 // Check if this binding ID is NOT one of the lambda's own arguments
                 // If it's not a lambda argument, and we haven't captured it yet, it's a capture
                 if !lambda_arg_binding_ids.contains(binding_id) && !visited.contains(binding_id) {
-                    // DEBUG: Print what variable we're processing
-                    println!(
-                        "DEBUG: Processing variable {} with binding ID {:?}",
-                        self.interner.resolve(*name),
-                        binding_id
-                    );
-
                     // Look up the binding in the environment to get its type
                     if let Some(binding) = self.env.bindings.get(binding_id) {
-                        println!("DEBUG: Found binding in environment");
                         captures.push((*name, *binding_id, binding.type_.clone()));
                         visited.insert(*binding_id);
-                    } else {
-                        println!("DEBUG: Binding NOT found in environment");
                     }
-                } else {
-                    println!(
-                        "DEBUG: Skipping variable {} - is lambda arg: {}, already visited: {}",
-                        self.interner.resolve(*name),
-                        lambda_arg_binding_ids.contains(binding_id),
-                        visited.contains(binding_id)
-                    );
                 }
             }
             TypedExprKind::Lambda { body, args, .. } => {
@@ -3269,21 +3410,99 @@ impl TypeChecker {
             ExprKind::MacroCall(name, args, delimiter) => {
                 let name_sym = self.interner.intern(name);
 
-                // Macros should be expanded before type checking, so at this point
-                // we just type check the arguments and return a fresh type variable
-                // since the macro expansion will determine the final type
-                let typed_args: Vec<_> = args.iter().map(|a| self.check_expr(a)).collect();
+                // Handle builtin macros specially
+                match name.as_str() {
+                    "println!" | "print!" => {
+                        // Type check the arguments (all args will be converted to strings and concatenated)
+                        let typed_args: Vec<_> = args.iter().map(|a| self.check_expr(a)).collect();
 
-                TypedExpr {
-                    span: expr.span.clone(),
-                    file: expr.file.clone(),
-                    expr: TypedExprKind::MacroCall {
-                        name: name_sym,
-                        macro_id: MacroId(0), // Placeholder - macros expanded before type checking
-                        args: typed_args,
-                        delimiter: delimiter.clone(),
-                    },
-                    type_: self.fresh_type_var(), // Return type determined after macro expansion
+                        // For print macros, the return type is unit
+                        TypedExpr {
+                            span: expr.span.clone(),
+                            file: expr.file.clone(),
+                            expr: TypedExprKind::MacroCall {
+                                name: name_sym,
+                                macro_id: MacroId(0), // Placeholder - macros will be expanded later
+                                args: typed_args,
+                                delimiter: delimiter.clone(),
+                            },
+                            type_: self.unit_type(), // print macros return unit
+                        }
+                    }
+                    "typeof!" => {
+                        if args.len() != 1 {
+                            self.diagnostics.add_type_error(TypeError {
+                                span: expr.span.clone(),
+                                file: expr.file.clone(),
+                                kind: TypeErrorKind::ArityMismatch {
+                                    expected: 1,
+                                    found: args.len(),
+                                    function: name_sym,
+                                },
+                            });
+                            return self.error_expr(expr);
+                        }
+
+                        // Type check the argument
+                        let typed_arg = self.check_expr(&args[0]);
+
+                        // typeof! returns a string type representing the type of the argument
+                        TypedExpr {
+                            span: expr.span.clone(),
+                            file: expr.file.clone(),
+                            expr: TypedExprKind::MacroCall {
+                                name: name_sym,
+                                macro_id: MacroId(0),
+                                args: vec![typed_arg],
+                                delimiter: delimiter.clone(),
+                            },
+                            type_: self.string_type(), // typeof! returns a string
+                        }
+                    }
+                    "input!" => {
+                        // input! takes no arguments
+                        if !args.is_empty() {
+                            self.diagnostics.add_type_error(TypeError {
+                                span: expr.span.clone(),
+                                file: expr.file.clone(),
+                                kind: TypeErrorKind::ArityMismatch {
+                                    expected: 0,
+                                    found: args.len(),
+                                    function: name_sym,
+                                },
+                            });
+                            return self.error_expr(expr);
+                        }
+
+                        // input! returns a string type
+                        TypedExpr {
+                            span: expr.span.clone(),
+                            file: expr.file.clone(),
+                            expr: TypedExprKind::MacroCall {
+                                name: name_sym,
+                                macro_id: MacroId(0),
+                                args: vec![], // No arguments for input!
+                                delimiter: delimiter.clone(),
+                            },
+                            type_: self.string_type(), // input! returns a string
+                        }
+                    }
+                    _ => {
+                        // For non-builtin macros, type check the arguments and return a fresh type variable
+                        let typed_args: Vec<_> = args.iter().map(|a| self.check_expr(a)).collect();
+
+                        TypedExpr {
+                            span: expr.span.clone(),
+                            file: expr.file.clone(),
+                            expr: TypedExprKind::MacroCall {
+                                name: name_sym,
+                                macro_id: MacroId(0), // Placeholder - macros expanded before type checking
+                                args: typed_args,
+                                delimiter: delimiter.clone(),
+                            },
+                            type_: self.fresh_type_var(), // Return type determined after macro expansion
+                        }
+                    }
                 }
             }
 
@@ -5335,7 +5554,7 @@ impl TypeChecker {
             span: None,
             file: None,
             type_: TypeKind::Constructor {
-                name: 2, // intern "Unit"
+                name: 4, // intern "unit" - should be ID 4 based on sequential interning
                 args: vec![],
                 kind: Kind::Star,
             },

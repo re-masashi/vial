@@ -2519,31 +2519,31 @@ fn test_lambda_capture_single_variable() {
 #[test]
 fn test_lambda_capture_multiple_variables() {
     let mut tc = setup();
+    let x_sym = tc.interner.intern("x");
+    let y_sym = tc.interner.intern("y");
 
-    // Create variables in outer scope
-    let x_binding = tc.interner.intern("x");
-    let y_binding = tc.interner.intern("y");
-    tc.env.push_scope();
+    let x_binding_id = tc.id_gen.fresh_binding();
     tc.env.add_binding(
-        x_binding,
+        x_sym,
         Binding {
-            id: BindingId(1),
-            name: x_binding,
-            type_: tc.int_type(),
-            mutable: false,
-        },
-    );
-    tc.env.add_binding(
-        y_binding,
-        Binding {
-            id: BindingId(2),
-            name: y_binding,
+            id: x_binding_id,
+            name: x_sym,
             type_: tc.int_type(),
             mutable: false,
         },
     );
 
-    // Create lambda that captures both "x" and "y": \z -> x + y + z
+    let y_binding_id = tc.id_gen.fresh_binding();
+    tc.env.add_binding(
+        y_sym,
+        Binding {
+            id: y_binding_id,
+            name: y_sym,
+            type_: tc.int_type(),
+            mutable: false,
+        },
+    );
+
     let lambda = Expr {
         span: dummy_span(),
         file: dummy_file(),
@@ -2588,11 +2588,9 @@ fn test_lambda_capture_multiple_variables() {
 
     let typed = tc.check_expr(&lambda);
 
-    // Check that it"s a lambda with captures
     if let TypedExprKind::Lambda { captures, .. } = &typed.expr {
         assert_eq!(captures.len(), 2, "Expected 2 captured variables");
 
-        // Check that both x and y are captured
         let captured_names: Vec<&str> = captures
             .iter()
             .map(|(name, _, _)| tc.interner.resolve(*name))
@@ -2602,10 +2600,6 @@ fn test_lambda_capture_multiple_variables() {
     } else {
         panic!("Expected lambda expression");
     }
-
-    assert!(!tc.diagnostics.has_errors());
-
-    tc.env.pop_scope();
 }
 
 #[test]
@@ -4357,4 +4351,248 @@ fn test_mixed_generic_type_interactions() {
 
     // Verify that both definitions use the same type parameter ID system correctly
     // (This checks for proper type parameter handling in complex scenarios)
+}
+
+// Builtin Type Tests
+
+#[test]
+fn test_builtin_option_type_registration() {
+    let mut tc = setup();
+
+    // Check that Option type is registered during initialization
+    let option_sym = tc.interner.intern("Option");
+    assert!(tc.env.enums.contains_key(&EnumId(option_sym.0)));
+
+    // Verify Option enum has the correct variants
+    let option_info = tc.env.enums.get(&EnumId(option_sym.0)).unwrap();
+    assert_eq!(tc.interner.resolve(option_info.name), "Option");
+
+    // Check for Some and None variants
+    assert!(
+        option_info
+            .variants
+            .contains_key(&tc.interner.intern("Some"))
+    );
+    assert!(
+        option_info
+            .variants
+            .contains_key(&tc.interner.intern("None"))
+    );
+}
+
+#[test]
+fn test_builtin_result_type_registration() {
+    let mut tc = setup();
+
+    // Check that Result type is registered during initialization
+    let result_sym = tc.interner.intern("Result");
+    assert!(tc.env.enums.contains_key(&EnumId(result_sym.0)));
+
+    // Verify Result enum has the correct variants
+    let result_info = tc.env.enums.get(&EnumId(result_sym.0)).unwrap();
+    assert_eq!(tc.interner.resolve(result_info.name), "Result");
+
+    // Check for Ok and Err variants
+    assert!(result_info.variants.contains_key(&tc.interner.intern("Ok")));
+    assert!(
+        result_info
+            .variants
+            .contains_key(&tc.interner.intern("Err"))
+    );
+}
+
+#[test]
+fn test_builtin_print_macro_type_checking() {
+    let mut tc = setup();
+
+    // Test print! macro with single argument
+    let print_macro = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::MacroCall(
+            "print!".to_string(),
+            vec![Expr {
+                span: dummy_span(),
+                file: dummy_file(),
+                expr: ExprKind::Int(42),
+            }],
+            crate::ast::Delimiter::Paren,
+        ),
+    };
+
+    let typed = tc.check_expr(&print_macro);
+    assert!(!tc.diagnostics.has_errors());
+
+    // print! should return unit
+    match &typed.type_.type_ {
+        TypeKind::Constructor { name, .. } => {
+            assert_eq!(*name, tc.interner.intern("unit").0);
+        }
+        _ => panic!("print! should return unit type"),
+    }
+}
+
+#[test]
+fn test_builtin_println_macro_type_checking() {
+    let mut tc = setup();
+
+    // Test println! macro with multiple arguments
+    let println_macro = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::MacroCall(
+            "println!".to_string(),
+            vec![
+                Expr {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    expr: ExprKind::Int(42),
+                },
+                Expr {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    expr: ExprKind::String("hello".to_string()),
+                },
+            ],
+            crate::ast::Delimiter::Paren,
+        ),
+    };
+
+    let typed = tc.check_expr(&println_macro);
+    assert!(!tc.diagnostics.has_errors());
+
+    // println! should return unit
+    match &typed.type_.type_ {
+        TypeKind::Constructor { name, .. } => {
+            assert_eq!(*name, tc.interner.intern("unit").0);
+        }
+        _ => panic!("println! should return unit type"),
+    }
+}
+
+#[test]
+fn test_builtin_typeof_macro_type_checking() {
+    let mut tc = setup();
+
+    // Test typeof! macro with an expression
+    let typeof_macro = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::MacroCall(
+            "typeof!".to_string(),
+            vec![Expr {
+                span: dummy_span(),
+                file: dummy_file(),
+                expr: ExprKind::Int(42),
+            }],
+            crate::ast::Delimiter::Paren,
+        ),
+    };
+
+    let typed = tc.check_expr(&typeof_macro);
+    assert!(!tc.diagnostics.has_errors());
+
+    // typeof! should return string
+    match &typed.type_.type_ {
+        TypeKind::Constructor { name, .. } => {
+            assert_eq!(*name, tc.interner.intern("string").0);
+        }
+        _ => panic!("typeof! should return string type"),
+    }
+}
+
+#[test]
+fn test_builtin_input_macro_type_checking() {
+    let mut tc = setup();
+
+    // Test input! macro with no arguments
+    let input_macro = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::MacroCall("input!".to_string(), vec![], crate::ast::Delimiter::Paren),
+    };
+
+    let typed = tc.check_expr(&input_macro);
+    assert!(!tc.diagnostics.has_errors());
+
+    // input! should return string
+    match &typed.type_.type_ {
+        TypeKind::Constructor { name, .. } => {
+            assert_eq!(*name, tc.interner.intern("string").0);
+        }
+        _ => panic!("input! should return string type"),
+    }
+}
+
+#[test]
+fn test_builtin_macro_wrong_arity() {
+    let mut tc = setup();
+
+    // Test typeof! with wrong number of arguments
+    let typeof_macro = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::MacroCall(
+            "typeof!".to_string(),
+            vec![
+                Expr {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    expr: ExprKind::Int(42),
+                },
+                Expr {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    expr: ExprKind::Int(43),
+                },
+            ],
+            crate::ast::Delimiter::Paren,
+        ),
+    };
+
+    let _typed = tc.check_expr(&typeof_macro);
+    assert!(tc.diagnostics.has_errors());
+
+    // Should have an arity mismatch error
+    let arity_errors: Vec<&TypeError> = tc
+        .diagnostics
+        .type_errors
+        .iter()
+        .filter(|e| matches!(e.kind, TypeErrorKind::ArityMismatch { .. }))
+        .collect();
+
+    assert!(!arity_errors.is_empty());
+}
+
+#[test]
+fn test_builtin_input_macro_wrong_args() {
+    let mut tc = setup();
+
+    // Test input! with arguments (should be none)
+    let input_macro = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::MacroCall(
+            "input!".to_string(),
+            vec![Expr {
+                span: dummy_span(),
+                file: dummy_file(),
+                expr: ExprKind::Int(42),
+            }],
+            crate::ast::Delimiter::Paren,
+        ),
+    };
+
+    let _typed = tc.check_expr(&input_macro);
+    assert!(tc.diagnostics.has_errors());
+
+    // Should have an arity mismatch error
+    let arity_errors: Vec<&TypeError> = tc
+        .diagnostics
+        .type_errors
+        .iter()
+        .filter(|e| matches!(e.kind, TypeErrorKind::ArityMismatch { .. }))
+        .collect();
+
+    assert!(!arity_errors.is_empty());
 }

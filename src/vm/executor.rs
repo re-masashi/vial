@@ -2,6 +2,14 @@ use super::{DecodedInstruction, EnumLayout, FunctionMetadata, Opcode, Operands, 
 // Import the decoder function properly
 use crate::vm::disassembler::decode_instruction_at;
 
+// Define builtin function IDs
+const BUILTIN_PRINT: u16 = 0;
+const BUILTIN_INPUT: u16 = 1;
+const BUILTIN_INT_TO_STRING: u16 = 2;
+const BUILTIN_FLOAT_TO_STRING: u16 = 3;
+const BUILTIN_BOOL_TO_STRING: u16 = 4;
+const BUILTIN_TYPEOF: u16 = 5;
+
 /// Simple VM implementation to execute Vial bytecode
 pub struct VM {
     /// The bytecode to execute
@@ -407,8 +415,7 @@ impl VM {
 
             // FUNCTION CALLS
             Opcode::Call => {
-                // Placeholder for function calls - return a default value for now
-                // This is the issue that was causing inconsistent behavior
+                // Placeholder for regular function calls - return a default value for now
                 if let Operands::Call {
                     func_id: _,
                     argc: _,
@@ -420,6 +427,104 @@ impl VM {
                     self.registers[0] = 0; // Put result in R0
                     // We should properly handle the call but for now just continue
                     eprintln!("Warning: Function calls not implemented, returning 0");
+                }
+            }
+
+            Opcode::CallBuiltin => {
+                if let Operands::Call {
+                    func_id,
+                    argc,
+                    args,
+                } = &instruction.operands
+                {
+                    // Handle builtin functions by function ID
+                    match *func_id {
+                        BUILTIN_PRINT => {
+                            // print() builtin function - expects one string argument
+                            if *argc == 1 {
+                                let arg_reg = args[0].0 as usize;
+                                let _string_ptr = self.registers[arg_reg] as *const u8;
+                                // For now, assume string is stored as a simple pointer
+                                // In a real implementation, we'd have proper string handling
+                                // For now, let's just print a message that we're calling print
+                                eprintln!(
+                                    "Print called with register value: {}",
+                                    self.registers[arg_reg]
+                                );
+                                // Print the register value as a placeholder
+                                println!("{}", self.registers[arg_reg]);
+                                // Return 0 (success) in R0
+                                self.registers[0] = 0;
+                            } else {
+                                return Err("print() expects 1 argument".to_string());
+                            }
+                        }
+                        BUILTIN_INPUT => {
+                            // input() builtin function - no arguments, returns string
+                            if *argc == 0 {
+                                // For testing purposes and deterministic behavior, always return 0 (empty string)
+                                // In a real implementation, we would read from stdin
+                                self.registers[0] = 0; // Return empty string equivalent
+                            } else {
+                                return Err("input() expects 0 arguments".to_string());
+                            }
+                        }
+                        BUILTIN_INT_TO_STRING => {
+                            // int_to_string() builtin function - converts int to string
+                            if *argc == 1 {
+                                let arg_reg = args[0].0 as usize;
+                                let int_val = self.registers[arg_reg];
+                                let string_val = int_val.to_string();
+
+                                // For now, return length of string as example (in real impl, return string pointer)
+                                self.registers[0] = string_val.len() as i64;
+                            } else {
+                                return Err("int_to_string() expects 1 argument".to_string());
+                            }
+                        }
+                        BUILTIN_FLOAT_TO_STRING => {
+                            // float_to_string() builtin function - converts float to string
+                            if *argc == 1 {
+                                let arg_reg = args[0].0 as usize;
+                                let float_val_as_int = self.registers[arg_reg]; // This is actually a float bit pattern
+
+                                // Convert back to float for demonstration
+                                let float_val = f64::from_bits(float_val_as_int as u64);
+                                let string_val = float_val.to_string();
+
+                                // For now, return length of string as example
+                                self.registers[0] = string_val.len() as i64;
+                            } else {
+                                return Err("float_to_string() expects 1 argument".to_string());
+                            }
+                        }
+                        BUILTIN_BOOL_TO_STRING => {
+                            // bool_to_string() builtin function - converts bool to string
+                            if *argc == 1 {
+                                let arg_reg = args[0].0 as usize;
+                                let bool_val = self.registers[arg_reg] != 0;
+                                let string_val = if bool_val { "true" } else { "false" };
+
+                                // For now, return length of string as example
+                                self.registers[0] = string_val.len() as i64;
+                            } else {
+                                return Err("bool_to_string() expects 1 argument".to_string());
+                            }
+                        }
+                        BUILTIN_TYPEOF => {
+                            // typeof() builtin function - returns type of value as string
+                            if *argc == 1 {
+                                // For now, just return a placeholder value
+                                // In a real implementation, we'd determine the type of the value
+                                self.registers[0] = 1; // Return some non-zero value
+                            } else {
+                                return Err("typeof() expects 1 argument".to_string());
+                            }
+                        }
+                        _ => {
+                            return Err(format!("Unknown builtin function ID: {}", func_id));
+                        }
+                    }
                 }
             }
 
@@ -475,4 +580,225 @@ pub fn run_bytecode(
     );
 
     vm.run()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vm::Reg;
+
+    #[test]
+    fn test_builtin_print_function() {
+        let mut vm = VM::new(vec![], vec![], vec![], vec![], vec![]);
+
+        // Simulate a CallBuiltin instruction for print
+        let instruction = DecodedInstruction {
+            opcode: Opcode::CallBuiltin,
+            operands: Operands::Call {
+                func_id: BUILTIN_PRINT,
+                argc: 1,
+                args: vec![Reg(0)], // Register 0 contains the string value
+            },
+            size: 4,
+        };
+
+        // Set register 0 to have a test value (representing a string)
+        vm.registers[0] = 42; // In our implementation, this will just print the value
+
+        // Execute the builtin print call
+        let result = vm.execute_instruction(&instruction);
+
+        assert!(result.is_ok());
+        // The return value should be in R0 (register 0) - should be 0 for success
+        assert_eq!(vm.registers[0], 0);
+    }
+
+    #[test]
+    fn test_builtin_input_function() {
+        let mut vm = VM::new(vec![], vec![], vec![], vec![], vec![]);
+
+        // Simulate a CallBuiltin instruction for input
+        let instruction = DecodedInstruction {
+            opcode: Opcode::CallBuiltin,
+            operands: Operands::Call {
+                func_id: BUILTIN_INPUT,
+                argc: 0,
+                args: vec![], // No arguments for input
+            },
+            size: 4,
+        };
+
+        // Execute the builtin input call
+        let result = vm.execute_instruction(&instruction);
+
+        assert!(result.is_ok());
+        // The return value should be in R0 (register 0) - string length
+        // Since we can't actually input, this will return 0 (empty string)
+        assert_eq!(vm.registers[0], 0);
+    }
+
+    #[test]
+    fn test_builtin_int_to_string_function() {
+        let mut vm = VM::new(vec![], vec![], vec![], vec![], vec![]);
+
+        // Simulate a CallBuiltin instruction for int_to_string
+        let instruction = DecodedInstruction {
+            opcode: Opcode::CallBuiltin,
+            operands: Operands::Call {
+                func_id: BUILTIN_INT_TO_STRING,
+                argc: 1,
+                args: vec![Reg(1)], // Register 1 contains the int value
+            },
+            size: 4,
+        };
+
+        // Set register 1 to have an integer value
+        vm.registers[1] = 123;
+
+        // Execute the builtin int_to_string call
+        let result = vm.execute_instruction(&instruction);
+
+        assert!(result.is_ok());
+        // The return value should be in R0 (register 0) - length of "123" is 3
+        assert_eq!(vm.registers[0], 3);
+    }
+
+    #[test]
+    fn test_builtin_float_to_string_function() {
+        let mut vm = VM::new(vec![], vec![], vec![], vec![], vec![]);
+
+        // Simulate a CallBuiltin instruction for float_to_string
+        let instruction = DecodedInstruction {
+            opcode: Opcode::CallBuiltin,
+            operands: Operands::Call {
+                func_id: BUILTIN_FLOAT_TO_STRING,
+                argc: 1,
+                args: vec![Reg(2)], // Register 2 contains the float value (as bit pattern)
+            },
+            size: 4,
+        };
+
+        // Set register 2 with bit pattern for float 3.14
+        vm.registers[2] = (3.14f64).to_bits() as i64;
+
+        // Execute the builtin float_to_string call
+        let result = vm.execute_instruction(&instruction);
+
+        assert!(result.is_ok());
+        // The return value should be in R0 (register 0) - length of string representation
+        // "3.14" has length 4, but our implementation just returns the length
+        assert_eq!(vm.registers[0], 4); // This will be the length of string "3.14"
+    }
+
+    #[test]
+    fn test_builtin_bool_to_string_function() {
+        let mut vm = VM::new(vec![], vec![], vec![], vec![], vec![]);
+
+        // Simulate a CallBuiltin instruction for bool_to_string with true
+        let instruction = DecodedInstruction {
+            opcode: Opcode::CallBuiltin,
+            operands: Operands::Call {
+                func_id: BUILTIN_BOOL_TO_STRING,
+                argc: 1,
+                args: vec![Reg(3)], // Register 3 contains the bool value (as 0 or non-zero)
+            },
+            size: 4,
+        };
+
+        // Set register 3 to have a true value (non-zero)
+        vm.registers[3] = 1;
+
+        // Execute the builtin bool_to_string call
+        let result = vm.execute_instruction(&instruction);
+
+        assert!(result.is_ok());
+        // The return value should be in R0 (register 0) - length of "true" is 4
+        assert_eq!(vm.registers[0], 4);
+
+        // Test with false
+        vm.registers[3] = 0; // false value
+
+        // Execute again
+        let result = vm.execute_instruction(&instruction);
+
+        assert!(result.is_ok());
+        // The return value should be in R0 (register 0) - length of "false" is 5
+        assert_eq!(vm.registers[0], 5);
+    }
+
+    #[test]
+    fn test_builtin_typeof_function() {
+        let mut vm = VM::new(vec![], vec![], vec![], vec![], vec![]);
+
+        // Simulate a CallBuiltin instruction for typeof
+        let instruction = DecodedInstruction {
+            opcode: Opcode::CallBuiltin,
+            operands: Operands::Call {
+                func_id: BUILTIN_TYPEOF,
+                argc: 1,
+                args: vec![Reg(4)], // Register 4 contains the value to check
+            },
+            size: 4,
+        };
+
+        // Set register 4 to have a test value
+        vm.registers[4] = 100;
+
+        // Execute the builtin typeof call
+        let result = vm.execute_instruction(&instruction);
+
+        assert!(result.is_ok());
+        // The return value should be in R0 (register 0) - non-zero for success
+        assert_eq!(vm.registers[0], 1); // Our implementation returns 1 for success
+    }
+
+    #[test]
+    fn test_unknown_builtin_function() {
+        let mut vm = VM::new(vec![], vec![], vec![], vec![], vec![]);
+
+        // Simulate a CallBuiltin instruction with unknown function ID
+        let instruction = DecodedInstruction {
+            opcode: Opcode::CallBuiltin,
+            operands: Operands::Call {
+                func_id: 999, // Unknown function ID
+                argc: 0,
+                args: vec![],
+            },
+            size: 4,
+        };
+
+        // Execute the unknown builtin function call
+        let result = vm.execute_instruction(&instruction);
+
+        // Should return an error
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .starts_with("Unknown builtin function ID")
+        );
+    }
+
+    #[test]
+    fn test_builtin_function_wrong_arity() {
+        let mut vm = VM::new(vec![], vec![], vec![], vec![], vec![]);
+
+        // Try to call print with 0 arguments (should require 1)
+        let instruction = DecodedInstruction {
+            opcode: Opcode::CallBuiltin,
+            operands: Operands::Call {
+                func_id: BUILTIN_PRINT,
+                argc: 0, // Wrong: should be 1
+                args: vec![],
+            },
+            size: 4,
+        };
+
+        // Execute the builtin print call with wrong arity
+        let result = vm.execute_instruction(&instruction);
+
+        // Should return an error
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("print() expects 1 argument"));
+    }
 }

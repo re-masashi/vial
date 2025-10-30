@@ -243,6 +243,7 @@ impl BytecodeCompiler {
             IRInstruction::Error { .. } => None,
             IRInstruction::Assign { result, .. } => Some(*result),
             IRInstruction::OptionalChain { result, .. } => Some(*result),
+            IRInstruction::CallBuiltin { result, .. } => Some(*result),
         }
     }
 
@@ -611,6 +612,50 @@ impl BytecodeCompiler {
                 // Emit Call instruction
                 self.emit_u8(0xA0); // Call
                 self.emit_u16_le(func_id);
+                self.emit_u8(args.len().min(8) as u8); // Limit args to 8 for now
+
+                // Emit argument registers (first 8 args in R1-R8)
+                for (i, arg) in args.iter().take(8).enumerate() {
+                    let arg_reg = self.get_register_for_value(arg, reg_alloc);
+                    // Arguments go in R1, R2, R3, etc.
+                    let arg_target_reg = (i + 1) as u8;
+                    if arg_reg != arg_target_reg {
+                        self.emit_u8(0xC0); // Move
+                        self.emit_u8(arg_target_reg);
+                        self.emit_u8(arg_reg);
+                    }
+                }
+
+                // Move return value to result register
+                let result_reg = self.get_register_for_value(&IRValue::SSA(*result), reg_alloc);
+                // Return value is in R0, so move it to the result register
+                if result_reg != 0 {
+                    self.emit_u8(0xC0); // Move
+                    self.emit_u8(result_reg);
+                    self.emit_u8(0); // R0
+                }
+            }
+            IRInstruction::CallBuiltin {
+                result,
+                builtin_name,
+                args,
+                ..
+            } => {
+                // Emit safepoint before call
+                let gc_ptr_regs = self.get_gc_pointer_registers(reg_alloc);
+                self.emit_stack_map_registers(&gc_ptr_regs);
+
+                // Map builtin function name to builtin ID
+                let builtin_id = match builtin_name.as_str() {
+                    "print" => 0, // BUILTIN_PRINT
+                    "input" => 1, // BUILTIN_INPUT
+                    // Could add more builtin mappings if needed
+                    _ => 0, // Default to 0 if not known
+                };
+
+                // Emit CallBuiltin instruction
+                self.emit_u8(0xA3); // CallBuiltin (0xA3)
+                self.emit_u16_le(builtin_id);
                 self.emit_u8(args.len().min(8) as u8); // Limit args to 8 for now
 
                 // Emit argument registers (first 8 args in R1-R8)

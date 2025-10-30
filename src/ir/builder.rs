@@ -49,7 +49,7 @@ pub struct IRBuilder {
 
 impl IRBuilder {
     pub fn new(target: TargetInfo, interner: crate::ast::Interner) -> Self {
-        Self {
+        let mut builder = Self {
             structs: BTreeMap::new(),
             enums: BTreeMap::new(),
             effects: BTreeMap::new(),
@@ -69,7 +69,185 @@ impl IRBuilder {
             next_memory_slot_id: 0,
             target,
             interner,
-        }
+        };
+
+        // Register builtin types
+        builder.register_builtin_types();
+
+        builder
+    }
+
+    fn register_builtin_types(&mut self) {
+        // Use local counters since the struct doesn't have these fields
+        let mut next_variant_id = self.next_enum_id + 100; // Use enum_id as base to avoid conflicts for variants
+        let mut next_type_var_id = 0; // Local counter for type variables
+
+        // Register Option<T> enum
+        let option_id = self.fresh_enum_id();
+        let option_name = "Option".to_string();
+
+        let some_variant_id = VariantId(next_variant_id);
+        next_variant_id += 1;
+        let none_variant_id = VariantId(next_variant_id);
+        next_variant_id += 1;
+
+        // Create Some variant with one field of generic type T
+        let some_variant = crate::ir::IREnumVariant {
+            name: "Some".to_string(),
+            variant_id: some_variant_id,
+            types: vec![IRTypeWithMemory {
+                type_: IRType::Named(format!("T{}", next_type_var_id), vec![]), // Placeholder for generic T
+                span: 0..0,
+                file: String::new(),
+                memory_kind: MemoryKind::Stack,
+                allocation_id: None,
+            }],
+            constructor_type: IRTypeWithMemory {
+                type_: IRType::Error, // Will be filled in properly
+                span: 0..0,
+                file: String::new(),
+                memory_kind: MemoryKind::Stack,
+                allocation_id: None,
+            },
+            span: 0..0,
+            file: String::new(),
+            data_offset: 0,
+            discriminant_value: 0,
+        };
+        next_type_var_id += 1;
+
+        // Create None variant with no fields
+        let none_variant = crate::ir::IREnumVariant {
+            name: "None".to_string(),
+            variant_id: none_variant_id,
+            types: vec![], // No fields
+            constructor_type: IRTypeWithMemory {
+                type_: IRType::Error, // Will be filled in properly
+                span: 0..0,
+                file: String::new(),
+                memory_kind: MemoryKind::Stack,
+                allocation_id: None,
+            },
+            span: 0..0,
+            file: String::new(),
+            data_offset: 0,
+            discriminant_value: 1, // Use different discriminant for None
+        };
+
+        let option_enum = crate::ir::IREnum {
+            id: option_id,
+            name: option_name.clone(),
+            vis: crate::ast::Visibility::Public,
+            variants: vec![some_variant, none_variant],
+            span: 0..0,
+            file: String::new(),
+            enum_type: IRTypeWithMemory {
+                type_: IRType::Named(option_name.clone(), vec![]), // Will be properly filled in
+                span: 0..0,
+                file: String::new(),
+                memory_kind: MemoryKind::Stack,
+                allocation_id: None,
+            },
+            memory_layout: crate::ir::MemoryLayout {
+                size: 0,                     // Will be computed
+                alignment: 0,                // Will be computed
+                field_offsets: Vec::new(),   // Will be computed
+                discriminant_offset: None,   // Will be computed
+                discriminant_size: None,     // Will be computed
+                discriminant_encoding: None, // Will be computed
+                padding_bytes: Vec::new(),   // Will be computed
+            },
+        };
+
+        self.enums.insert(option_id, option_enum);
+        self.enum_names.insert(option_name, option_id);
+
+        // Register Result<T, E> enum
+        let result_id = self.fresh_enum_id();
+        let result_name = "Result".to_string();
+
+        let ok_variant_id = VariantId(next_variant_id);
+        next_variant_id += 1;
+        let err_variant_id = VariantId(next_variant_id);
+        // next_variant_id += 1;
+
+        // Create Ok variant with one field of generic type T
+        let ok_variant = crate::ir::IREnumVariant {
+            name: "Ok".to_string(),
+            variant_id: ok_variant_id,
+            types: vec![IRTypeWithMemory {
+                type_: IRType::Named(format!("T{}", next_type_var_id), vec![]), // Placeholder for generic T
+                span: 0..0,
+                file: String::new(),
+                memory_kind: MemoryKind::Stack,
+                allocation_id: None,
+            }],
+            constructor_type: IRTypeWithMemory {
+                type_: IRType::Error, // Will be filled in properly
+                span: 0..0,
+                file: String::new(),
+                memory_kind: MemoryKind::Stack,
+                allocation_id: None,
+            },
+            span: 0..0,
+            file: String::new(),
+            data_offset: 0,
+            discriminant_value: 0,
+        };
+        next_type_var_id += 1;
+
+        // Create Err variant with one field of generic type E
+        let err_variant = crate::ir::IREnumVariant {
+            name: "Err".to_string(),
+            variant_id: err_variant_id,
+            types: vec![IRTypeWithMemory {
+                type_: IRType::Named(format!("E{}", next_type_var_id), vec![]), // Placeholder for generic E
+                span: 0..0,
+                file: String::new(),
+                memory_kind: MemoryKind::Stack,
+                allocation_id: None,
+            }],
+            constructor_type: IRTypeWithMemory {
+                type_: IRType::Error, // Will be filled in properly
+                span: 0..0,
+                file: String::new(),
+                memory_kind: MemoryKind::Stack,
+                allocation_id: None,
+            },
+            span: 0..0,
+            file: String::new(),
+            data_offset: 0,
+            discriminant_value: 1, // Use different discriminant for Err
+        };
+        // next_type_var_id += 1;
+
+        let result_enum = crate::ir::IREnum {
+            id: result_id,
+            name: result_name.clone(),
+            vis: crate::ast::Visibility::Public,
+            variants: vec![ok_variant, err_variant],
+            span: 0..0,
+            file: String::new(),
+            enum_type: IRTypeWithMemory {
+                type_: IRType::Named(result_name.clone(), vec![]), // Will be properly filled in
+                span: 0..0,
+                file: String::new(),
+                memory_kind: MemoryKind::Stack,
+                allocation_id: None,
+            },
+            memory_layout: crate::ir::MemoryLayout {
+                size: 0,                     // Will be computed
+                alignment: 0,                // Will be computed
+                field_offsets: Vec::new(),   // Will be computed
+                discriminant_offset: None,   // Will be computed
+                discriminant_size: None,     // Will be computed
+                discriminant_encoding: None, // Will be computed
+                padding_bytes: Vec::new(),   // Will be computed
+            },
+        };
+
+        self.enums.insert(result_id, result_enum);
+        self.enum_names.insert(result_name, result_id);
     }
 
     pub fn lower_program(&mut self, ast: Vec<TypedASTNode>) -> IRModule {
@@ -1729,19 +1907,57 @@ impl<'a> FunctionBuilder<'a> {
             .map(|ty| self.builder.convert_type(ty))
             .collect();
 
+        // Check if this is a call to a builtin function
         let result = self.builder.fresh_value_id();
-        self.emit(IRInstruction::Call {
-            result,
-            metadata: InstructionMetadata {
-                memory_slot: None,
-                allocation_site: None,
-            },
-            function: func_val,
-            args: arg_values,
-            type_args,
-            span: expr.span.clone(),
-            file: expr.file.clone(),
-        });
+        match &function.expr {
+            TypedExprKind::Variable { name, .. } => {
+                // Check if it's a builtin function
+                let builtin_name = self.builder.interner.resolve(*name).to_string();
+                if builtin_name == "print" || builtin_name == "input" {
+                    // Generate CallBuiltin instruction for builtin functions
+                    self.emit(IRInstruction::CallBuiltin {
+                        result,
+                        metadata: InstructionMetadata {
+                            memory_slot: None,
+                            allocation_site: None,
+                        },
+                        builtin_name,
+                        args: arg_values,
+                        span: expr.span.clone(),
+                        file: expr.file.clone(),
+                    });
+                } else {
+                    // Generate regular Call instruction for user-defined functions
+                    self.emit(IRInstruction::Call {
+                        result,
+                        metadata: InstructionMetadata {
+                            memory_slot: None,
+                            allocation_site: None,
+                        },
+                        function: func_val,
+                        args: arg_values,
+                        type_args,
+                        span: expr.span.clone(),
+                        file: expr.file.clone(),
+                    });
+                }
+            }
+            _ => {
+                // For function values (not direct variable references), assume it's a regular call
+                self.emit(IRInstruction::Call {
+                    result,
+                    metadata: InstructionMetadata {
+                        memory_slot: None,
+                        allocation_site: None,
+                    },
+                    function: func_val,
+                    args: arg_values,
+                    type_args,
+                    span: expr.span.clone(),
+                    file: expr.file.clone(),
+                });
+            }
+        }
 
         IRValue::SSA(result)
     }

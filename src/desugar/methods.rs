@@ -480,9 +480,126 @@ fn desugar_expr(expr: Expr) -> Expr {
             }
         }
 
-        ExprKind::MacroCall(name, args, delimiter) => {
-            let new_args = args.into_iter().map(desugar_expr).collect();
-            ExprKind::MacroCall(name, new_args, delimiter)
+        ExprKind::MacroCall(ref name, ref args, ref delimiter) => {
+            match name.as_str() {
+                "println!" | "print!" => {
+                    // Desugar println! and print! macros
+                    let desugared_args: Vec<_> = args.iter().cloned().map(desugar_expr).collect();
+
+                    // Create a sequence of type conversions and concatenations:
+                    // For println!("Hello", x, y), we convert each arg to string and concatenate them
+                    if desugared_args.is_empty() {
+                        // If no args, just print an empty string (or newline for println)
+                        let print_string = if name == "println!" {
+                            ExprKind::String("\n".to_string())
+                        } else {
+                            ExprKind::String("".to_string())
+                        };
+                        ExprKind::Call(
+                            Box::new(Expr {
+                                span: expr.span.clone(),
+                                file: expr.file.clone(),
+                                expr: ExprKind::Variable("print".to_string()),
+                            }),
+                            vec![Expr {
+                                span: expr.span.clone(),
+                                file: expr.file.clone(),
+                                expr: print_string,
+                            }],
+                        )
+                    } else {
+                        // Convert each argument to string and concatenate them
+                        let mut concat_expr: Option<Expr> = None;
+                        for (i, arg) in desugared_args.iter().enumerate() {
+                            let converted_arg = convert_to_string(arg, &expr);
+
+                            if i == 0 {
+                                concat_expr = Some(converted_arg.clone());
+                            } else {
+                                concat_expr = Some(Expr {
+                                    span: expr.span.clone(),
+                                    file: expr.file.clone(),
+                                    expr: ExprKind::BinOp(
+                                        Box::new(concat_expr.unwrap()),
+                                        BinOp::Add, // String concatenation
+                                        Box::new(converted_arg.clone()),
+                                    ),
+                                });
+                            }
+                        }
+
+                        // If it's println!, also concatenate a newline character
+                        if name == "println!" {
+                            concat_expr = Some(Expr {
+                                span: expr.span.clone(),
+                                file: expr.file.clone(),
+                                expr: ExprKind::BinOp(
+                                    Box::new(concat_expr.unwrap()),
+                                    BinOp::Add,
+                                    Box::new(Expr {
+                                        span: expr.span.clone(),
+                                        file: expr.file.clone(),
+                                        expr: ExprKind::String("\n".to_string()),
+                                    }),
+                                ),
+                            });
+                        }
+
+                        // Call the print function with the concatenated string
+                        ExprKind::Call(
+                            Box::new(Expr {
+                                span: expr.span.clone(),
+                                file: expr.file.clone(),
+                                expr: ExprKind::Variable("print".to_string()),
+                            }),
+                            vec![concat_expr.unwrap()],
+                        )
+                    }
+                }
+                "typeof!" => {
+                    // typeof! macro: returns the string representation of the type of the argument
+                    if args.len() != 1 {
+                        // This error should ideally be caught at type checking, but we add it here for safety
+                        ExprKind::String("error".to_string()) // Return an error string
+                    } else {
+                        // For typeof!, we need to get the type string. Since this happens after type checking,
+                        // in the desugaring phase, we'll create a call to a builtin typeof function
+                        // This will be handled properly in the typechecker but desugared here
+                        let desugared_arg = desugar_expr(args[0].clone());
+
+                        ExprKind::Call(
+                            Box::new(Expr {
+                                span: expr.span.clone(),
+                                file: expr.file.clone(),
+                                expr: ExprKind::Variable("typeof".to_string()),
+                            }),
+                            vec![desugared_arg],
+                        )
+                    }
+                }
+                "input!" => {
+                    // input! macro: returns user input as a string
+                    if !args.is_empty() {
+                        // This error should ideally be caught at type checking, but we add it here for safety
+                        ExprKind::String("".to_string()) // Return empty string for safety
+                    } else {
+                        // Create a call to the builtin input function
+                        ExprKind::Call(
+                            Box::new(Expr {
+                                span: expr.span.clone(),
+                                file: expr.file.clone(),
+                                expr: ExprKind::Variable("input".to_string()),
+                            }),
+                            vec![], // input! takes no arguments
+                        )
+                    }
+                }
+                _ => {
+                    // For non-builtin macros, just desugar the arguments
+                    let new_args = args.iter().cloned().map(desugar_expr).collect();
+                    ExprKind::MacroCall(name.to_string(), new_args, delimiter.clone())
+                }
+            }
         }
 
         ExprKind::Lambda { args, expression } => {
@@ -573,5 +690,50 @@ fn desugar_pattern(pattern: Pattern) -> Pattern {
         span: pattern.span,
         file: pattern.file,
         pat: new_pat,
+    }
+}
+
+// Helper function to convert an expression to a string representation
+fn convert_to_string(expr: &Expr, original_expr: &Expr) -> Expr {
+    // Determine the type of the expression and apply the appropriate conversion
+    match &expr.expr {
+        ExprKind::Int(_) => Expr {
+            span: expr.span.clone(),
+            file: expr.file.clone(),
+            expr: ExprKind::Call(
+                Box::new(Expr {
+                    span: original_expr.span.clone(),
+                    file: original_expr.file.clone(),
+                    expr: ExprKind::Variable("int_to_string".to_string()),
+                }),
+                vec![expr.clone()],
+            ),
+        },
+        ExprKind::Float(_) => Expr {
+            span: expr.span.clone(),
+            file: expr.file.clone(),
+            expr: ExprKind::Call(
+                Box::new(Expr {
+                    span: original_expr.span.clone(),
+                    file: original_expr.file.clone(),
+                    expr: ExprKind::Variable("float_to_string".to_string()),
+                }),
+                vec![expr.clone()],
+            ),
+        },
+        ExprKind::Bool(_) => Expr {
+            span: expr.span.clone(),
+            file: expr.file.clone(),
+            expr: ExprKind::Call(
+                Box::new(Expr {
+                    span: original_expr.span.clone(),
+                    file: original_expr.file.clone(),
+                    expr: ExprKind::Variable("bool_to_string".to_string()),
+                }),
+                vec![expr.clone()],
+            ),
+        },
+        // For strings and other types that are already strings or can be handled directly
+        _ => expr.clone(),
     }
 }

@@ -584,6 +584,16 @@ pub enum IRInstruction {
         file: String,
     },
 
+    // Builtin function call
+    CallBuiltin {
+        result: ValueId,
+        metadata: InstructionMetadata,
+        builtin_name: String, // Name of builtin function
+        args: Vec<IRValue>,
+        span: Range<usize>,
+        file: String,
+    },
+
     // Cast
     Cast {
         result: ValueId,

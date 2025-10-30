@@ -348,3 +348,221 @@ fn test_extern_function_private_visibility() {
     assert_eq!(extern_func.vis, Visibility::Private);
     assert_eq!(extern_func.args.len(), 0);
 }
+
+// Builtin type tests
+
+#[test]
+fn test_builtin_option_enum_creation() {
+    let option_enum = IREnum {
+        id: EnumId(0), // Option enum ID
+        name: "Option".to_string(),
+        vis: Visibility::Public,
+        variants: vec![
+            IREnumVariant {
+                name: "Some".to_string(),
+                variant_id: VariantId(0),
+                types: vec![IRTypeWithMemory {
+                    type_: IRType::Named("T".to_string(), vec![]), // Placeholder for generic T
+                    span: 0..0,
+                    file: String::new(),
+                    memory_kind: MemoryKind::Stack,
+                    allocation_id: None,
+                }],
+                constructor_type: IRTypeWithMemory {
+                    type_: IRType::Error,
+                    span: 0..0,
+                    file: String::new(),
+                    memory_kind: MemoryKind::Stack,
+                    allocation_id: None,
+                },
+                span: 0..0,
+                file: String::new(),
+                data_offset: 0,
+                discriminant_value: 0,
+            },
+            IREnumVariant {
+                name: "None".to_string(),
+                variant_id: VariantId(1),
+                types: vec![], // No fields
+                constructor_type: IRTypeWithMemory {
+                    type_: IRType::Error,
+                    span: 0..0,
+                    file: String::new(),
+                    memory_kind: MemoryKind::Stack,
+                    allocation_id: None,
+                },
+                span: 0..0,
+                file: String::new(),
+                data_offset: 0,
+                discriminant_value: 1,
+            },
+        ],
+        span: 0..0,
+        file: String::new(),
+        enum_type: IRTypeWithMemory {
+            type_: IRType::Named("Option".to_string(), vec![]),
+            span: 0..0,
+            file: String::new(),
+            memory_kind: MemoryKind::Stack,
+            allocation_id: None,
+        },
+        memory_layout: MemoryLayout {
+            size: 0,
+            alignment: 0,
+            field_offsets: Vec::new(),
+            discriminant_offset: None,
+            discriminant_size: None,
+            discriminant_encoding: None,
+            padding_bytes: Vec::new(),
+        },
+    };
+
+    assert_eq!(option_enum.name, "Option");
+    assert_eq!(option_enum.vis, Visibility::Public);
+    assert_eq!(option_enum.variants.len(), 2);
+
+    // Check that both variants exist
+    let some_variant = &option_enum.variants[0];
+    let none_variant = &option_enum.variants[1];
+
+    assert_eq!(some_variant.name, "Some");
+    assert_eq!(none_variant.name, "None");
+    assert_eq!(some_variant.types.len(), 1); // Some(T)
+    assert_eq!(none_variant.types.len(), 0); // None has no fields
+}
+
+#[test]
+fn test_builtin_result_enum_creation() {
+    let result_enum = IREnum {
+        id: EnumId(1), // Result enum ID
+        name: "Result".to_string(),
+        vis: Visibility::Public,
+        variants: vec![
+            IREnumVariant {
+                name: "Ok".to_string(),
+                variant_id: VariantId(0),
+                types: vec![IRTypeWithMemory {
+                    type_: IRType::Named("T".to_string(), vec![]), // Placeholder for generic T
+                    span: 0..0,
+                    file: String::new(),
+                    memory_kind: MemoryKind::Stack,
+                    allocation_id: None,
+                }],
+                constructor_type: IRTypeWithMemory {
+                    type_: IRType::Error,
+                    span: 0..0,
+                    file: String::new(),
+                    memory_kind: MemoryKind::Stack,
+                    allocation_id: None,
+                },
+                span: 0..0,
+                file: String::new(),
+                data_offset: 0,
+                discriminant_value: 0,
+            },
+            IREnumVariant {
+                name: "Err".to_string(),
+                variant_id: VariantId(1),
+                types: vec![IRTypeWithMemory {
+                    type_: IRType::Named("E".to_string(), vec![]), // Placeholder for generic E
+                    span: 0..0,
+                    file: String::new(),
+                    memory_kind: MemoryKind::Stack,
+                    allocation_id: None,
+                }],
+                constructor_type: IRTypeWithMemory {
+                    type_: IRType::Error,
+                    span: 0..0,
+                    file: String::new(),
+                    memory_kind: MemoryKind::Stack,
+                    allocation_id: None,
+                },
+                span: 0..0,
+                file: String::new(),
+                data_offset: 0,
+                discriminant_value: 1,
+            },
+        ],
+        span: 0..0,
+        file: String::new(),
+        enum_type: IRTypeWithMemory {
+            type_: IRType::Named("Result".to_string(), vec![]),
+            span: 0..0,
+            file: String::new(),
+            memory_kind: MemoryKind::Stack,
+            allocation_id: None,
+        },
+        memory_layout: MemoryLayout {
+            size: 0,
+            alignment: 0,
+            field_offsets: Vec::new(),
+            discriminant_offset: None,
+            discriminant_size: None,
+            discriminant_encoding: None,
+            padding_bytes: Vec::new(),
+        },
+    };
+
+    assert_eq!(result_enum.name, "Result");
+    assert_eq!(result_enum.vis, Visibility::Public);
+    assert_eq!(result_enum.variants.len(), 2);
+
+    // Check that both variants exist
+    let ok_variant = &result_enum.variants[0];
+    let err_variant = &result_enum.variants[1];
+
+    assert_eq!(ok_variant.name, "Ok");
+    assert_eq!(err_variant.name, "Err");
+    assert_eq!(ok_variant.types.len(), 1); // Ok(T)
+    assert_eq!(err_variant.types.len(), 1); // Err(E)
+}
+
+#[test]
+fn test_builtin_types_memory_kind() {
+    // Test that builtin types have appropriate memory kinds
+    let option_type = IRTypeWithMemory {
+        type_: IRType::Named(
+            "Option".to_string(),
+            vec![IRTypeWithMemory {
+                type_: IRType::Int,
+                memory_kind: MemoryKind::Stack,
+                span: 0..0,
+                file: String::new(),
+                allocation_id: None,
+            }],
+        ),
+        memory_kind: MemoryKind::Heap, // Options might be heap allocated depending on content
+        span: 0..0,
+        file: String::new(),
+        allocation_id: None,
+    };
+
+    let result_type = IRTypeWithMemory {
+        type_: IRType::Named(
+            "Result".to_string(),
+            vec![
+                IRTypeWithMemory {
+                    type_: IRType::Int,
+                    memory_kind: MemoryKind::Stack,
+                    span: 0..0,
+                    file: String::new(),
+                    allocation_id: None,
+                },
+                IRTypeWithMemory {
+                    type_: IRType::String,
+                    memory_kind: MemoryKind::Heap,
+                    span: 0..0,
+                    file: String::new(),
+                    allocation_id: None,
+                },
+            ],
+        ),
+        memory_kind: MemoryKind::Heap, // Results might be heap allocated
+        span: 0..0,
+        file: String::new(),
+        allocation_id: None,
+    };
+
+    assert_eq!(option_type.memory_kind, MemoryKind::Heap);
+    assert_eq!(result_type.memory_kind, MemoryKind::Heap);
+}

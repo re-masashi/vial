@@ -24,13 +24,42 @@ impl UntypedValidator {
         Self {
             defined_items: HashMap::new(),
             module_resolver: ModuleResolver::new(&project_root),
-            macros: HashMap::new(),
+            macros: Self::builtin_macros(),
             in_loop: false,
             in_function: false,
             in_user_function: false,
             current_file: String::new(),
             diagnostics: ErrorReporter::new(),
         }
+    }
+
+    fn builtin_macros() -> HashMap<String, MacroDef> {
+        let mut macros = HashMap::new();
+
+        // Define builtin macros with empty rules since they are handled specially during type checking
+        // Register both with and without exclamation marks in case parser strips them
+        let builtin_names = ["println!", "print!", "typeof!", "input!"];
+        let fallback_names = ["println", "print", "typeof", "input"];
+
+        for name in builtin_names.iter().chain(fallback_names.iter()) {
+            let macro_def = MacroDef {
+                span: 0..0, // Placeholder span
+                file: String::new(),
+                name: name.to_string(),
+                rules: vec![], // Builtin macros have no expansion rules - handled in type checker
+                hygiene: MacroHygiene::Hygienic,
+            };
+            macros.insert(name.to_string(), macro_def);
+        }
+
+        macros
+    }
+
+    fn is_builtin_macro(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "println!" | "print!" | "typeof!" | "input!" | "println" | "print" | "typeof" | "input"
+        )
     }
 
     pub fn validate(&mut self, nodes: Vec<ASTNode>, current_file: &Path) -> Vec<ASTNode> {
@@ -348,21 +377,32 @@ impl UntypedValidator {
 
     fn expand_expr(&mut self, expr: Expr) -> Expr {
         match expr.expr {
-            ExprKind::MacroCall(name, _args, _delimiter) => {
+            ExprKind::MacroCall(name, args, delimiter) => {
                 if let Some(_macro_def) = self.macros.get(&name) {
-                    // TODO: Actual macro expansion
-                    self.diagnostics.add_error(VialError::ValidationError {
-                        span: expr.span.clone(),
-                        file: expr.file.clone(),
-                        kind: ValidationErrorKind::MacroExpansionFailed {
-                            name: name.clone(),
-                            reason: "Macro expansion not yet implemented".to_string(),
-                        },
-                    });
-                    Expr {
-                        span: expr.span,
-                        file: expr.file,
-                        expr: ExprKind::Error,
+                    // Check if this is a builtin macro that should not be expanded
+                    if self.is_builtin_macro(&name) {
+                        // Builtin macros are handled specially during type checking, no expansion needed
+                        // Reconstruct the expression since we moved its parts
+                        Expr {
+                            span: expr.span,
+                            file: expr.file,
+                            expr: ExprKind::MacroCall(name, args, delimiter),
+                        }
+                    } else {
+                        // TODO: Actual macro expansion for user-defined macros
+                        self.diagnostics.add_error(VialError::ValidationError {
+                            span: expr.span.clone(),
+                            file: expr.file.clone(),
+                            kind: ValidationErrorKind::MacroExpansionFailed {
+                                name: name.clone(),
+                                reason: "Macro expansion not yet implemented".to_string(),
+                            },
+                        });
+                        Expr {
+                            span: expr.span,
+                            file: expr.file,
+                            expr: ExprKind::Error,
+                        }
                     }
                 } else {
                     self.diagnostics.add_error(VialError::ValidationError {
