@@ -6,6 +6,9 @@ use crate::typechecker::EffectSet;
 
 pub mod builder;
 
+#[cfg(test)]
+mod tests;
+
 // Memory management related types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MemorySlotId(pub usize);
@@ -891,6 +894,21 @@ pub struct IRFunction {
     pub body: Option<BasicBlockId>,            // ID of the entry block
     pub memory_usage: MemoryUsage,             // Information about memory usage for analysis
     pub optimization_hints: OptimizationHints, // Optimization hints
+}
+
+#[derive(Debug, Clone)]
+pub struct IRExternFunction {
+    pub id: FunctionId,
+    pub name: String,
+    pub vis: Visibility,
+    pub args: Vec<IRFunctionArg>,
+    pub return_type: IRTypeWithMemory,
+    pub effects: EffectSet,
+    pub function_type: IRTypeWithMemory,
+    pub library: String,             // Library name where the function is defined
+    pub symbol_name: Option<String>, // Optional C symbol name (if different from function name)
+    pub span: Range<usize>,
+    pub file: String,
 }
 
 #[derive(Debug, Clone)]

@@ -9,6 +9,3 @@ pub mod validation; // IDK SOME STUFF NEEDS TO BE IN THE VALIDATOR SOME HERE
 pub mod compiler;
 pub mod ir;
 pub mod vm;
-
-#[cfg(test)]
-mod ir_generation_tests;

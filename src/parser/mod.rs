@@ -1323,6 +1323,7 @@ fn function<'src>()
             any().ignored(),
             one_of([
                 Token::KeywordDef,
+                Token::KeywordExtern,
                 Token::KeywordStruct,
                 Token::KeywordEnum,
                 Token::KeywordType,
@@ -1359,6 +1360,84 @@ fn function<'src>()
             },
         )
         .labelled("function")
+}
+
+fn extern_function<'src>()
+-> impl Parser<'src, &'src [Token], ExternFunction, extra::Err<Rich<'src, Token, Span>>> + Clone {
+    let vis = just(Token::KeywordPub).to(Visibility::Public).or_not();
+
+    just(Token::KeywordExtern)
+        .ignore_then(just(Token::KeywordDef))
+        .ignore_then(vis)
+        .then(ident().labelled("function name"))
+        .then(
+            just(Token::Less)
+                .ignore_then(
+                    type_param()
+                        .separated_by(just(Token::Comma))
+                        .collect::<Vec<_>>(),
+                )
+                .then_ignore(just(Token::Greater))
+                .or_not(),
+        )
+        .then(
+            just(Token::LParen)
+                .labelled("'(' for parameters")
+                .ignore_then(
+                    ident()
+                        .then(just(Token::Colon).ignore_then(type_annot()).or_not())
+                        .map_with(|(name, ty), e| FnArg {
+                            span: to_range(e.span()),
+                            file: String::new(),
+                            name,
+                            type_: ty,
+                        })
+                        .separated_by(just(Token::Comma))
+                        .allow_trailing()
+                        .collect::<Vec<_>>(),
+                )
+                .then_ignore(just(Token::RParen).labelled("')' for parameters"))
+                .recover_with(via_parser(nested_delimiters(
+                    Token::LParen,
+                    Token::RParen,
+                    [
+                        (Token::LBrace, Token::RBrace),
+                        (Token::LBracket, Token::RBracket),
+                    ],
+                    |_| vec![],
+                ))),
+        )
+        .then(just(Token::Arrow).ignore_then(type_annot()).or_not())
+        .then(
+            select! { Token::Variable(s) if s == "effects" => () }
+                .ignore_then(ident().separated_by(just(Token::Comma)).collect::<Vec<_>>())
+                .map(|effects: Vec<String>| EffectAnnot::closed_simple(effects))
+                .or_not(),
+        )
+        .then(where_clause().or_not())
+        .then(
+            just(Token::Assign) // extern function declaration has no body but may specify library
+                .ignore_then(select! { Token::String(s) => s })
+                .or_not(), // Optional library specification
+        )
+        .map_with(
+            |(((((((vis, name), type_params), args), ret_type), effects), where_), library), e| {
+                ExternFunction {
+                    span: to_range(e.span()),
+                    file: String::new(),
+                    vis: vis.unwrap_or(Visibility::Private),
+                    name,
+                    type_params: type_params.unwrap_or_default(),
+                    args,
+                    return_type: ret_type,
+                    where_constraints: where_.unwrap_or_default(),
+                    effects: effects.unwrap_or_else(EffectAnnot::pure),
+                    library: library.unwrap_or_else(|| "libc".to_string()), // Default to libc
+                    symbol_name: None, // For now, symbol name defaults to function name
+                }
+            },
+        )
+        .labelled("extern function")
 }
 
 fn struct_def<'src>()
@@ -1903,6 +1982,7 @@ pub fn parser<'src>()
             impl_block().map(ASTNodeKind::Impl),
             trait_def().map(ASTNodeKind::Trait),
             effect_def().map(ASTNodeKind::EffectDef),
+            extern_function().map(|ef| ASTNodeKind::ExternFunction(Box::new(ef))),
             function().map(|f| ASTNodeKind::Function(Box::new(f))),
         )))
         .map_with(|(attrs, node), e| ASTNode {
@@ -1916,6 +1996,7 @@ pub fn parser<'src>()
             choice((
                 just(Token::At).ignored(), // For next attribute
                 just(Token::KeywordDef).ignored(),
+                just(Token::KeywordExtern).ignored(),
                 just(Token::KeywordStruct).ignored(),
                 just(Token::KeywordEnum).ignored(),
                 just(Token::KeywordType).ignored(),

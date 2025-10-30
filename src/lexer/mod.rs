@@ -111,6 +111,9 @@ pub enum Token {
     #[token("where")]
     KeywordWhere,
 
+    #[token("extern")]
+    KeywordExtern,
+
     #[token("effect")]
     KeywordEffect,
 
@@ -333,6 +336,7 @@ impl fmt::Display for Token {
             Token::KeywordReturn => write!(f, "return"),
             Token::KeywordBreak => write!(f, "break"),
             Token::KeywordContinue => write!(f, "continue"),
+            Token::KeywordExtern => write!(f, "extern"),
             Token::KeywordEffect => write!(f, "effect"),
             Token::KeywordPerform => write!(f, "perform"),
             Token::KeywordHandle => write!(f, "handle"),

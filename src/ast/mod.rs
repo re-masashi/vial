@@ -16,6 +16,7 @@ pub struct ASTNode {
 pub enum ASTNodeKind {
     Expr(Expr),
     Function(Box<Function>),
+    ExternFunction(Box<ExternFunction>),
     Struct(Struct),
     Enum(Enum),
     TypeAlias(TypeAlias),
@@ -416,6 +417,22 @@ pub struct Function {
     pub body: Option<Expr>, // no body implies declaration
 }
 
+#[derive(Debug, Clone)]
+pub struct ExternFunction {
+    pub span: Range<usize>,
+    pub file: String,
+
+    pub vis: Visibility,
+    pub name: String,
+    pub type_params: Vec<TypeParam>,
+    pub args: Vec<FnArg>,
+    pub return_type: Option<TypeAnnot>,
+    pub where_constraints: Vec<TypeConstraint>,
+    pub effects: EffectAnnot,
+    pub library: String,             // library name where the function is defined
+    pub symbol_name: Option<String>, // optional C symbol name (if different from function name)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Visibility {
     Public,
@@ -768,6 +785,7 @@ pub struct TypedASTNode {
 pub enum TypedASTNodeKind {
     Expr(TypedExpr),
     Function(Box<TypedFunction>),
+    ExternFunction(Box<TypedExternFunction>),
     Struct(TypedStruct),
     Enum(TypedEnum),
     TypeAlias(TypedTypeAlias),
@@ -1039,6 +1057,24 @@ pub struct TypedFunction {
     pub effects: EffectSet,
     pub function_type: Rc<Type>,
     pub body: Option<TypedExpr>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TypedExternFunction {
+    pub span: Range<usize>,
+    pub file: String,
+    pub vis: Visibility,
+    pub name: Symbol,
+    pub function_id: FunctionId,
+
+    pub type_params: Vec<TypedTypeParam>,
+    pub args: Vec<TypedFnArg>,
+    pub return_type: Rc<Type>,
+    pub where_constraints: Vec<TypedConstraint>,
+    pub effects: EffectSet,
+    pub function_type: Rc<Type>,
+    pub library: String,             // library name where the function is defined
+    pub symbol_name: Option<String>, // optional C symbol name (if different from function name)
 }
 
 #[derive(Debug, Clone)]

@@ -8,9 +8,10 @@ use crate::ast::{
 };
 use crate::ir::{
     AddressKind, AllocationId, BasicBlock, BasicBlockId, BasicBlockInfo, ControlFlowGraph,
-    EffectId, EnumId, FieldId, FunctionId, IREffect, IREffectOperation, IREnum, IREnumVariant,
-    IRFunction, IRFunctionArg, IRInstruction, IRModule, IRStruct, IRStructField, IRTerminator,
-    IRType, IRTypeWithMemory, IRValue, InstructionMetadata, MemoryKind, MemorySlotId, StructId,
+    EffectId, EnumId, EscapeAnalysisInfo, FieldId, FunctionId, IREffect, IREffectOperation, IREnum,
+    IREnumVariant, IRExternFunction, IRFunction, IRFunctionArg, IRInstruction, IRModule, IRStruct,
+    IRStructField, IRTerminator, IRType, IRTypeWithMemory, IRValue, InlineHint,
+    InstructionMetadata, MemoryKind, MemorySlotId, MemoryUsage, OptimizationHints, StructId,
     TargetInfo, ValueId, VariantId,
 };
 
@@ -23,6 +24,7 @@ pub struct IRBuilder {
     enums: DeterministicMap<EnumId, IREnum>,
     effects: DeterministicMap<EffectId, IREffect>,
     functions: DeterministicMap<FunctionId, IRFunction>,
+    extern_functions: DeterministicMap<FunctionId, IRExternFunction>,
 
     // Name → ID mappings - using BTreeMap for deterministic ordering
     struct_names: DeterministicMap<String, StructId>,
@@ -52,6 +54,7 @@ impl IRBuilder {
             enums: BTreeMap::new(),
             effects: BTreeMap::new(),
             functions: BTreeMap::new(),
+            extern_functions: BTreeMap::new(),
             struct_names: BTreeMap::new(),
             enum_names: BTreeMap::new(),
             effect_names: BTreeMap::new(),
@@ -101,10 +104,61 @@ impl IRBuilder {
 
         let mut function_keys: Vec<_> = self.functions.keys().cloned().collect();
         function_keys.sort();
-        let functions: Vec<_> = function_keys
+        let mut functions: Vec<_> = function_keys
             .into_iter()
             .map(|id| self.functions[&id].clone())
             .collect();
+
+        // Add extern functions to the functions vector
+        let mut extern_function_keys: Vec<_> = self.extern_functions.keys().cloned().collect();
+        extern_function_keys.sort();
+        let extern_functions: Vec<_> = extern_function_keys
+            .into_iter()
+            .map(|id| {
+                // Convert IRExternFunction to IRFunction with no body for now
+                // In the future, we might want a different approach
+                let extern_func = &self.extern_functions[&id];
+                IRFunction {
+                    id: extern_func.id,
+                    name: extern_func.name.clone(),
+                    vis: extern_func.vis,
+                    args: extern_func.args.clone(),
+                    return_type: extern_func.return_type.clone(),
+                    effects: extern_func.effects.clone(),
+                    function_type: extern_func.function_type.clone(),
+                    basic_blocks: Vec::new(),
+                    cfg: ControlFlowGraph {
+                        blocks: BTreeMap::new(),
+                        entry: BasicBlockId(0),
+                        exits: Vec::new(),
+                    },
+                    span: extern_func.span.clone(),
+                    file: extern_func.file.clone(),
+                    body: None,
+                    memory_usage: MemoryUsage {
+                        max_stack_size: 0,
+                        heap_allocations: Vec::new(),
+                        escape_analysis_info: EscapeAnalysisInfo {
+                            escaping_values: Vec::new(),
+                            stack_allocated_values: Vec::new(),
+                            heap_allocated_values: Vec::new(),
+                            value_lifetimes: BTreeMap::new(),
+                            escape_reasons: BTreeMap::new(),
+                            capture_sets: BTreeMap::new(),
+                        },
+                    },
+                    optimization_hints: OptimizationHints {
+                        inline: InlineHint::Never, // Never inline extern functions
+                        is_pure: extern_func.effects.is_pure(),
+                        is_cold: true, // Extern functions are typically cold
+                        should_unroll: None,
+                    },
+                }
+            })
+            .collect();
+
+        // Append extern functions to the functions vector
+        functions.extend(extern_functions);
 
         IRModule {
             structs,
@@ -157,6 +211,52 @@ impl IRBuilder {
                     self.functions.insert(id, ir_function);
                     self.function_names
                         .insert(self.interner.resolve(f.name).to_string(), id);
+                }
+                TypedASTNodeKind::ExternFunction(extern_f) => {
+                    let id = self.fresh_function_id();
+                    let ir_extern_function = self.convert_extern_function(extern_f, id);
+
+                    // Convert to a regular IRFunction without a body
+                    let ir_function = IRFunction {
+                        id: ir_extern_function.id,
+                        name: ir_extern_function.name.clone(),
+                        vis: ir_extern_function.vis,
+                        args: ir_extern_function.args.clone(),
+                        return_type: ir_extern_function.return_type.clone(),
+                        effects: ir_extern_function.effects.clone(),
+                        function_type: ir_extern_function.function_type.clone(),
+                        basic_blocks: Vec::new(),
+                        body: None,
+                        span: ir_extern_function.span.clone(),
+                        file: ir_extern_function.file.clone(),
+                        cfg: ControlFlowGraph {
+                            blocks: BTreeMap::new(),
+                            entry: BasicBlockId(0),
+                            exits: Vec::new(),
+                        },
+                        memory_usage: MemoryUsage {
+                            max_stack_size: 0,
+                            heap_allocations: Vec::new(),
+                            escape_analysis_info: EscapeAnalysisInfo {
+                                escaping_values: Vec::new(),
+                                stack_allocated_values: Vec::new(),
+                                heap_allocated_values: Vec::new(),
+                                value_lifetimes: BTreeMap::new(),
+                                escape_reasons: BTreeMap::new(),
+                                capture_sets: BTreeMap::new(),
+                            },
+                        },
+                        optimization_hints: OptimizationHints {
+                            inline: InlineHint::Never, // Never inline extern functions
+                            is_pure: ir_extern_function.effects.is_pure(),
+                            is_cold: true, // Extern functions are typically cold
+                            should_unroll: None,
+                        },
+                    };
+
+                    self.functions.insert(id, ir_function);
+                    self.function_names
+                        .insert(self.interner.resolve(extern_f.name).to_string(), id);
                 }
                 _ => {}
             }
@@ -368,6 +468,39 @@ impl IRBuilder {
         }
     }
 
+    fn convert_extern_function(
+        &mut self,
+        extern_f: &crate::ast::TypedExternFunction,
+        id: FunctionId,
+    ) -> IRExternFunction {
+        let parameters: Vec<_> = extern_f
+            .args
+            .iter()
+            .map(|param| IRFunctionArg {
+                name: self.interner.resolve(param.name).to_string(),
+                binding_id: param.binding_id.0,
+                type_: self.convert_type(&param.type_),
+                memory_slot: self.fresh_memory_slot_id(),
+                span: param.span.clone(),
+                file: param.file.clone(),
+            })
+            .collect();
+
+        IRExternFunction {
+            id: FunctionId(id.0), // Convert from AST FunctionId to IR FunctionId
+            name: self.interner.resolve(extern_f.name).to_string(),
+            vis: extern_f.vis,
+            args: parameters,
+            return_type: self.convert_type(&extern_f.return_type),
+            effects: extern_f.effects.clone(),
+            function_type: self.convert_type(&extern_f.function_type),
+            library: extern_f.library.clone(),
+            symbol_name: extern_f.symbol_name.clone(),
+            span: extern_f.span.clone(),
+            file: extern_f.file.clone(),
+        }
+    }
+
     fn lower_function_bodies(&mut self, ast: &[TypedASTNode]) {
         // Collect function IDs first to avoid borrowing issues
         let function_ids: Vec<_> = ast
@@ -400,16 +533,19 @@ impl IRBuilder {
                     None
                 }
             }) {
-                let mut fb = FunctionBuilder::new(self, function_id);
+                // Only process functions that have bodies (not extern functions)
+                if f.body.is_some() {
+                    let mut fb = FunctionBuilder::new(self, function_id);
 
-                if let Some(body) = &f.body {
-                    fb.lower_function_body(f, body);
+                    if let Some(body) = &f.body {
+                        fb.lower_function_body(f, body);
+                    }
+
+                    // Collect the basic blocks and function_id for later use
+                    let basic_blocks = fb.blocks.into_values().collect::<Vec<_>>();
+                    let cfg = self.build_cfg(&basic_blocks); // Build CFG now while we can
+                    function_data.push((function_id, basic_blocks, cfg));
                 }
-
-                // Collect the basic blocks and function_id for later use
-                let basic_blocks = fb.blocks.into_values().collect::<Vec<_>>();
-                let cfg = self.build_cfg(&basic_blocks); // Build CFG now while we can
-                function_data.push((function_id, basic_blocks, cfg));
             }
         }
 

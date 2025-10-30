@@ -1157,6 +1157,16 @@ impl TypeChecker {
                 }
             }
 
+            ASTNodeKind::ExternFunction(extern_func) => {
+                let typed = self.check_extern_function(*extern_func);
+                TypedASTNode {
+                    span: node.span,
+                    file: node.file,
+                    node: TypedASTNodeKind::ExternFunction(Box::new(typed)),
+                    attributes: node.attributes,
+                }
+            }
+
             ASTNodeKind::MacroDef(macro_def) => {
                 let typed = self.check_macro_def(macro_def);
                 TypedASTNode {
@@ -4599,6 +4609,180 @@ impl TypeChecker {
         }
     }
 
+    fn check_extern_function(&mut self, extern_func: ExternFunction) -> TypedExternFunction {
+        let extern_func_id = self.id_gen.fresh_function();
+        let name_sym = self.interner.intern(&extern_func.name);
+
+        // Create type parameter mapping for type annotation resolution
+        let mut type_param_map = std::collections::HashMap::new();
+        let typeparams: Vec<TypedTypeParam> = extern_func
+            .type_params
+            .iter()
+            .map(|tp| {
+                let var_id = self.id_gen.fresh_type();
+                let name = self.interner.intern(&tp.name);
+                type_param_map.insert(
+                    name,
+                    Rc::new(Type {
+                        span: None,
+                        file: None,
+                        type_: TypeKind::Variable {
+                            id: var_id.0,
+                            kind: tp
+                                .kind
+                                .as_ref()
+                                .map(|k| self.convert_kind_annot(k))
+                                .unwrap_or(Kind::Star),
+                        },
+                    }),
+                );
+                TypedTypeParam {
+                    name,
+                    var_id,
+                    kind: tp
+                        .kind
+                        .as_ref()
+                        .map(|k| self.convert_kind_annot(k))
+                        .unwrap_or(Kind::Star),
+                    bounds: tp
+                        .bounds
+                        .iter()
+                        .map(|b| self.resolve_type_annot(b))
+                        .collect(),
+                }
+            })
+            .collect();
+
+        // Resolve parameter types
+        let param_types: Vec<Rc<Type>> = extern_func
+            .args
+            .iter()
+            .map(|arg| {
+                if let Some(type_annot) = &arg.type_ {
+                    self.resolve_type_annot_with_params(type_annot, &type_param_map)
+                } else {
+                    self.fresh_type_var()
+                }
+            })
+            .collect();
+
+        // Resolve return type
+        let return_type = if let Some(ret) = &extern_func.return_type {
+            self.resolve_type_annot_with_params(ret, &type_param_map)
+        } else {
+            self.fresh_type_var()
+        };
+
+        // Convert effects
+        let effects = self.convert_effect_annot(&extern_func.effects);
+
+        // Build function type
+        let base_func_type = Rc::new(Type {
+            span: Some(extern_func.span.clone()),
+            file: Some(extern_func.file.clone()),
+            type_: TypeKind::Function {
+                params: param_types.clone(),
+                return_type: return_type.clone(),
+                effects: effects.clone(),
+            },
+        });
+
+        // For generic extern functions, wrap in Forall; otherwise just use the base type
+        let func_type = if !extern_func.type_params.is_empty() {
+            // Convert type parameter bounds to trait constraints
+            let mut constraints = Vec::new();
+            for tp in typeparams.iter() {
+                for bound in &tp.bounds {
+                    // Find the trait that this bound refers to
+                    // The bound should be a trait type, so we need to extract the trait id
+                    if let TypeKind::Constructor { name, .. } = &bound.type_ {
+                        // Create a trait constraint: this type parameter implements this trait
+                        constraints.push(Constraint::Trait(tp.var_id.0, *name));
+                    }
+                }
+            }
+
+            Rc::new(Type {
+                span: Some(extern_func.span.clone()),
+                file: Some(extern_func.file.clone()),
+                type_: TypeKind::Forall {
+                    vars: typeparams
+                        .iter()
+                        .map(|tp| (tp.var_id.0, tp.kind.clone()))
+                        .collect(),
+                    constraints, // Now with proper trait constraints
+                    body: base_func_type,
+                },
+            })
+        } else {
+            base_func_type
+        };
+
+        // Create typed args
+        let args: Vec<TypedFnArg> = extern_func
+            .args
+            .iter()
+            .zip(&param_types)
+            .map(|(arg, param_type)| {
+                let binding_id = self.id_gen.fresh_binding();
+                let arg_sym = self.interner.intern(&arg.name);
+
+                TypedFnArg {
+                    span: arg.span.clone(),
+                    file: arg.file.clone(),
+                    name: arg_sym,
+                    binding_id,
+                    type_: param_type.clone(),
+                }
+            })
+            .collect();
+
+        // Register the extern function in the environment
+        let extern_func_info = FunctionInfo {
+            id: extern_func_id,
+            name: name_sym,
+            type_: func_type.clone(),
+        };
+        self.env.functions.insert(extern_func_id, extern_func_info);
+
+        // Add binding to environment
+        self.env.add_binding(
+            name_sym,
+            Binding {
+                id: BindingId(extern_func_id.0),
+                name: name_sym,
+                type_: func_type.clone(),
+                mutable: false,
+            },
+        );
+
+        TypedExternFunction {
+            span: extern_func.span,
+            file: extern_func.file,
+            vis: extern_func.vis,
+            name: name_sym,
+            function_id: extern_func_id,
+            type_params: typeparams,
+            args,
+            return_type,
+            where_constraints: extern_func
+                .where_constraints
+                .iter()
+                .map(|c| TypedConstraint {
+                    span: c.span.clone(),
+                    constraint: Constraint::Equal(
+                        self.resolve_type_annot(&c.left),
+                        self.resolve_type_annot(&c.right),
+                    ),
+                })
+                .collect(),
+            effects,
+            function_type: func_type,
+            library: extern_func.library,
+            symbol_name: extern_func.symbol_name,
+        }
+    }
+
     fn check_effect_def(&mut self, effect: EffectDef) -> TypedEffectDef {
         let effect_id = self.id_gen.fresh_effect();
         let effect_sym = self.interner.intern(&effect.name);
@@ -5069,6 +5253,9 @@ impl TypeChecker {
             TypedASTNodeKind::MacroDef(m) => {
                 TypedASTNodeKind::MacroDef(self.apply_substitution_to_macro_def(m))
             }
+            TypedASTNodeKind::ExternFunction(extern_func) => TypedASTNodeKind::ExternFunction(
+                Box::new(self.apply_substitution_to_extern_function(*extern_func)),
+            ),
             TypedASTNodeKind::Expr(expr) => {
                 TypedASTNodeKind::Expr(self.apply_substitution_to_expr(expr))
             }
@@ -5100,6 +5287,37 @@ impl TypeChecker {
             effects: func.effects,
             function_type: self.substitution.apply(&func.function_type),
             body: func.body.map(|b| self.apply_substitution_to_expr(b)),
+        }
+    }
+
+    fn apply_substitution_to_extern_function(
+        &self,
+        extern_func: TypedExternFunction,
+    ) -> TypedExternFunction {
+        TypedExternFunction {
+            span: extern_func.span,
+            file: extern_func.file,
+            vis: extern_func.vis,
+            name: extern_func.name,
+            function_id: extern_func.function_id,
+            type_params: extern_func.type_params,
+            args: extern_func
+                .args
+                .into_iter()
+                .map(|arg| TypedFnArg {
+                    span: arg.span,
+                    file: arg.file,
+                    name: arg.name,
+                    binding_id: arg.binding_id,
+                    type_: self.substitution.apply(&arg.type_),
+                })
+                .collect(),
+            return_type: self.substitution.apply(&extern_func.return_type),
+            where_constraints: extern_func.where_constraints,
+            effects: extern_func.effects,
+            function_type: self.substitution.apply(&extern_func.function_type),
+            library: extern_func.library,
+            symbol_name: extern_func.symbol_name,
         }
     }
 
