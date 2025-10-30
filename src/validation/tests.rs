@@ -1,6 +1,6 @@
 use crate::ast::*;
+use crate::error::{ValidationErrorKind, VialError};
 use crate::validation::UntypedValidator;
-use crate::validation::ValidationErrorKind;
 
 use std::fs;
 use std::ops::Range;
@@ -68,8 +68,11 @@ fn test_duplicate_function_detection() {
     assert!(validator.diagnostics.has_errors());
     assert_eq!(validator.diagnostics.errors.len(), 1);
 
-    match &validator.diagnostics.errors[0].kind {
-        ValidationErrorKind::DuplicateDefinition { name, .. } => {
+    match &validator.diagnostics.errors[0] {
+        VialError::ValidationError {
+            kind: ValidationErrorKind::DuplicateDefinition { name, .. },
+            ..
+        } => {
             assert_eq!(name, "foo");
         }
         _ => panic!("Expected DuplicateDefinition error"),
@@ -117,8 +120,11 @@ fn test_duplicate_struct_fields() {
     let _result = validator.validate(nodes, &PathBuf::from("test.ni"));
 
     assert!(validator.diagnostics.has_errors());
-    match &validator.diagnostics.errors[0].kind {
-        ValidationErrorKind::DuplicateField { field } => {
+    match &validator.diagnostics.errors[0] {
+        VialError::ValidationError {
+            kind: ValidationErrorKind::DuplicateField { field },
+            ..
+        } => {
             assert_eq!(field, "x");
         }
         _ => panic!("Expected DuplicateField error"),
@@ -145,8 +151,11 @@ fn test_break_outside_loop() {
     let _result = validator.validate(nodes, &PathBuf::from("test.ni"));
 
     assert!(validator.diagnostics.has_errors());
-    match &validator.diagnostics.errors[0].kind {
-        ValidationErrorKind::BreakOutsideLoop => {}
+    match &validator.diagnostics.errors[0] {
+        VialError::ValidationError {
+            kind: ValidationErrorKind::BreakOutsideLoop,
+            ..
+        } => {}
         _ => panic!("Expected BreakOutsideLoop error"),
     }
 }
@@ -169,8 +178,11 @@ fn test_continue_outside_loop() {
     let _result = validator.validate(nodes, &PathBuf::from("test.ni"));
 
     assert!(validator.diagnostics.has_errors());
-    match &validator.diagnostics.errors[0].kind {
-        ValidationErrorKind::ContinueOutsideLoop => {}
+    match &validator.diagnostics.errors[0] {
+        VialError::ValidationError {
+            kind: ValidationErrorKind::ContinueOutsideLoop,
+            ..
+        } => {}
         _ => panic!("Expected ContinueOutsideLoop error"),
     }
 }
@@ -385,8 +397,11 @@ fn test_duplicate_methods_in_struct() {
     let _result = validator.validate(nodes, &PathBuf::from("test.ni"));
 
     assert!(validator.diagnostics.has_errors());
-    match &validator.diagnostics.errors[0].kind {
-        ValidationErrorKind::DuplicateDefinition { name, .. } => {
+    match &validator.diagnostics.errors[0] {
+        VialError::ValidationError {
+            kind: ValidationErrorKind::DuplicateDefinition { name, .. },
+            ..
+        } => {
             assert_eq!(name, "foo");
         }
         _ => panic!("Expected DuplicateDefinition error"),
@@ -782,8 +797,11 @@ fn test_import_nonexistent_module() {
     let _result = validator.validate(nodes, &PathBuf::from("test.ni"));
     assert!(validator.diagnostics.has_errors());
 
-    match &validator.diagnostics.errors[0].kind {
-        ValidationErrorKind::ImportNotFound { path } => {
+    match &validator.diagnostics.errors[0] {
+        VialError::ValidationError {
+            kind: ValidationErrorKind::ImportNotFound { path },
+            ..
+        } => {
             assert!(path.contains("nonexistent"));
         }
         _ => panic!("Expected ImportNotFound error"),

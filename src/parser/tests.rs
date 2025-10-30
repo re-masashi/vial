@@ -8,7 +8,7 @@ use chumsky::Parser;
 fn parse_expr(source: &str) -> Expr {
     let tokens: Vec<_> = Token::lexer(source).filter_map(|t| t.ok()).collect();
 
-    println!("Tokens: {:?}", tokens);
+    // println!("Tokens: {:?}", tokens);
 
     let (ast, errors) = crate::parser::parser()
         .parse(tokens.as_slice())
@@ -147,7 +147,7 @@ fn test_pipe_operator() {
 
     // Chained pipes (Right-associative): x |> (double |> square)
     let expr = parse_expr("x |> double |> square");
-    println!("{:#?}", expr.expr);
+    // println!("{:#?}", expr.expr);
     match &expr.expr {
         ExprKind::BinOp(left, BinOp::Pipe, right) => {
             // Left is x

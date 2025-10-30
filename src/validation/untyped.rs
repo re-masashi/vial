@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
-use super::errors::*;
 use super::imports::*;
 use crate::ast::*;
+use crate::error::{ErrorReporter, ValidationErrorKind, VialError};
 
 #[derive(Debug)]
 pub struct UntypedValidator {
@@ -16,7 +16,7 @@ pub struct UntypedValidator {
     in_user_function: bool, // either in user-defined function (true) vs auto-generated main (fals)
     current_file: String,
 
-    pub diagnostics: ValidationDiagnostics,
+    pub diagnostics: ErrorReporter,
 }
 
 impl UntypedValidator {
@@ -29,7 +29,7 @@ impl UntypedValidator {
             in_function: false,
             in_user_function: false,
             current_file: String::new(),
-            diagnostics: ValidationDiagnostics::new(),
+            diagnostics: ErrorReporter::new(),
         }
     }
 
@@ -203,7 +203,7 @@ impl UntypedValidator {
         let mut seen_methods: HashMap<String, Range<usize>> = HashMap::new();
         for method in &struct_def.methods {
             if let Some(existing) = seen_methods.get(&method.name) {
-                self.diagnostics.add_error(ValidationError {
+                self.diagnostics.add_error(VialError::ValidationError {
                     span: method.span.clone(),
                     file: method.file.clone(),
                     kind: ValidationErrorKind::DuplicateDefinition {
@@ -256,7 +256,7 @@ impl UntypedValidator {
         let mut seen_methods: HashMap<String, Range<usize>> = HashMap::new();
         for method in &enum_def.methods {
             if let Some(existing) = seen_methods.get(&method.name) {
-                self.diagnostics.add_error(ValidationError {
+                self.diagnostics.add_error(VialError::ValidationError {
                     span: method.span.clone(),
                     file: method.file.clone(),
                     kind: ValidationErrorKind::DuplicateDefinition {
@@ -304,7 +304,7 @@ impl UntypedValidator {
         for node in nodes {
             if let ASTNodeKind::MacroDef(macro_def) = &node.node {
                 if let Some(existing) = self.macros.get(&macro_def.name) {
-                    self.diagnostics.add_error(ValidationError {
+                    self.diagnostics.add_error(VialError::ValidationError {
                         span: macro_def.span.clone(),
                         file: macro_def.file.clone(),
                         kind: ValidationErrorKind::DuplicateDefinition {
@@ -351,7 +351,7 @@ impl UntypedValidator {
             ExprKind::MacroCall(name, _args, _delimiter) => {
                 if let Some(_macro_def) = self.macros.get(&name) {
                     // TODO: Actual macro expansion
-                    self.diagnostics.add_error(ValidationError {
+                    self.diagnostics.add_error(VialError::ValidationError {
                         span: expr.span.clone(),
                         file: expr.file.clone(),
                         kind: ValidationErrorKind::MacroExpansionFailed {
@@ -365,7 +365,7 @@ impl UntypedValidator {
                         expr: ExprKind::Error,
                     }
                 } else {
-                    self.diagnostics.add_error(ValidationError {
+                    self.diagnostics.add_error(VialError::ValidationError {
                         span: expr.span.clone(),
                         file: expr.file.clone(),
                         kind: ValidationErrorKind::MacroNotFound { name },
@@ -581,7 +581,7 @@ impl UntypedValidator {
         match expr.expr {
             ExprKind::Break(val) => {
                 if !self.in_loop {
-                    self.diagnostics.add_error(ValidationError {
+                    self.diagnostics.add_error(VialError::ValidationError {
                         span: expr.span.clone(),
                         file: expr.file.clone(),
                         kind: ValidationErrorKind::BreakOutsideLoop,
@@ -596,7 +596,7 @@ impl UntypedValidator {
 
             ExprKind::Continue => {
                 if !self.in_loop {
-                    self.diagnostics.add_error(ValidationError {
+                    self.diagnostics.add_error(VialError::ValidationError {
                         span: expr.span.clone(),
                         file: expr.file.clone(),
                         kind: ValidationErrorKind::ContinueOutsideLoop,
@@ -917,7 +917,7 @@ impl UntypedValidator {
 
         for (field, _vis) in &struct_def.fields {
             if let Some(_existing) = seen_fields.get(&field.name) {
-                self.diagnostics.add_error(ValidationError {
+                self.diagnostics.add_error(VialError::ValidationError {
                     span: field.span.clone(),
                     file: field.file.clone(),
                     kind: ValidationErrorKind::DuplicateField {
@@ -937,7 +937,7 @@ impl UntypedValidator {
 
         for variant in &enum_def.variants {
             if let Some(_existing) = seen_variants.get(&variant.name) {
-                self.diagnostics.add_error(ValidationError {
+                self.diagnostics.add_error(VialError::ValidationError {
                     span: variant.span.clone(),
                     file: variant.file.clone(),
                     kind: ValidationErrorKind::DuplicateVariant {
@@ -981,7 +981,7 @@ impl UntypedValidator {
             match &node.node {
                 ASTNodeKind::Function(func) => {
                     if let Some(existing) = self.defined_items.get(&func.name) {
-                        self.diagnostics.add_error(ValidationError {
+                        self.diagnostics.add_error(VialError::ValidationError {
                             span: func.span.clone(),
                             file: func.file.clone(),
                             kind: ValidationErrorKind::DuplicateDefinition {
@@ -997,7 +997,7 @@ impl UntypedValidator {
 
                 ASTNodeKind::Struct(s) => {
                     if let Some(existing) = self.defined_items.get(&s.name) {
-                        self.diagnostics.add_error(ValidationError {
+                        self.diagnostics.add_error(VialError::ValidationError {
                             span: s.span.clone(),
                             file: s.file.clone(),
                             kind: ValidationErrorKind::DuplicateDefinition {
@@ -1012,7 +1012,7 @@ impl UntypedValidator {
 
                 ASTNodeKind::Enum(e) => {
                     if let Some(existing) = self.defined_items.get(&e.name) {
-                        self.diagnostics.add_error(ValidationError {
+                        self.diagnostics.add_error(VialError::ValidationError {
                             span: e.span.clone(),
                             file: e.file.clone(),
                             kind: ValidationErrorKind::DuplicateDefinition {
@@ -1027,7 +1027,7 @@ impl UntypedValidator {
 
                 ASTNodeKind::TypeAlias(ta) => {
                     if let Some(existing) = self.defined_items.get(&ta.name) {
-                        self.diagnostics.add_error(ValidationError {
+                        self.diagnostics.add_error(VialError::ValidationError {
                             span: ta.span.clone(),
                             file: ta.file.clone(),
                             kind: ValidationErrorKind::DuplicateDefinition {
@@ -1042,7 +1042,7 @@ impl UntypedValidator {
 
                 ASTNodeKind::Trait(t) => {
                     if let Some(existing) = self.defined_items.get(&t.name) {
-                        self.diagnostics.add_error(ValidationError {
+                        self.diagnostics.add_error(VialError::ValidationError {
                             span: t.span.clone(),
                             file: "".to_string(),
                             kind: ValidationErrorKind::DuplicateDefinition {
@@ -1057,7 +1057,7 @@ impl UntypedValidator {
 
                 ASTNodeKind::EffectDef(eff) => {
                     if let Some(existing) = self.defined_items.get(&eff.name) {
-                        self.diagnostics.add_error(ValidationError {
+                        self.diagnostics.add_error(VialError::ValidationError {
                             span: eff.span.clone(),
                             file: eff.file.clone(),
                             kind: ValidationErrorKind::DuplicateDefinition {

@@ -2214,13 +2214,13 @@ mod tests {
             type_: IRTypeWithMemory {
                 type_: crate::ir::IRType::Int,
                 span: 0..0,
-                file: "".to_string(),
+                file: String::new(),
                 memory_kind: MemoryKind::Stack,
                 allocation_id: None,
             },
             memory_slot: MemorySlotId(0),
             span: 0..0,
-            file: "".to_string(),
+            file: String::new(),
         };
 
         let arg2 = IRFunctionArg {
@@ -2811,7 +2811,7 @@ mod tests {
                 allocation_site: None,
             },
             var: "result".to_string(),
-            value: IRValue::Float(3.14), // Simple float literal
+            value: IRValue::Float(std::f64::consts::PI), // Use the PI constant
             var_type: IRTypeWithMemory {
                 type_: crate::ir::IRType::Float,
                 span: 0..0,

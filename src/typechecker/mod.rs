@@ -189,6 +189,32 @@ pub struct TypeError {
     pub kind: TypeErrorKind,
 }
 
+// Helper function to convert token spans to character spans
+pub fn token_range_to_char_range(
+    token_range: &Range<usize>,
+    token_spans: &[std::ops::Range<usize>],
+) -> std::ops::Range<usize> {
+    if token_range.is_empty() || token_spans.is_empty() {
+        return 0..0;
+    }
+
+    let start_idx = token_range.start;
+    let end_idx = token_range.end.saturating_sub(1); // end index is exclusive, so subtract 1 to get last token
+
+    if start_idx >= token_spans.len() {
+        return token_spans.last().map(|s| s.start..s.end).unwrap_or(0..0);
+    }
+
+    let start_pos = token_spans[start_idx].start;
+    let end_pos = if end_idx < token_spans.len() {
+        token_spans[end_idx].end
+    } else {
+        token_spans.last().map(|s| s.end).unwrap_or(start_pos)
+    };
+
+    start_pos..end_pos
+}
+
 #[derive(Debug, Clone)]
 pub enum TypeErrorKind {
     TypeMismatch {
@@ -248,47 +274,93 @@ pub enum TypeErrorKind {
 }
 
 impl TypeError {
-    pub fn report(&self, interner: &Interner, source: &str) {
+    pub fn report(
+        &self,
+        interner: &Interner,
+        token_spans: &[std::ops::Range<usize>],
+        source: &str,
+    ) {
+        let char_span = token_range_to_char_range(&self.span, token_spans);
+
         match &self.kind {
             TypeErrorKind::TypeMismatch {
                 expected,
                 found,
                 context,
             } => {
-                Report::build(ReportKind::Error, (self.file.clone(), self.span.clone()))
-                    .with_code("E001")
-                    .with_message("Type mismatch")
-                    .with_label(
-                        Label::new((self.file.clone(), self.span.clone()))
-                            .with_message(format!(
-                                "Expected type {}, but found {}",
-                                expected.display(interner),
-                                found.display(interner)
-                            ))
-                            .with_color(Color::Red),
-                    )
-                    .with_note(format!("In context: {}", context))
+                eprintln!("DEBUG: TypeMismatch error triggered");
+                let expected_str =
+                    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        expected.display(interner)
+                    })) {
+                        Ok(s) => s,
+                        Err(_) => format!("<type display error: {:?}>", expected.type_),
+                    };
+                let found_str = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    found.display(interner)
+                })) {
+                    Ok(s) => s,
+                    Err(_) => format!("<type display error: {:?}>", found.type_),
+                };
+
+                eprintln!(
+                    "DEBUG: Expected type: {}, Found type: {}",
+                    expected_str, found_str
+                );
+
+                let report =
+                    Report::build(ReportKind::Error, (self.file.clone(), char_span.clone()))
+                        .with_code("E001")
+                        .with_message("Type mismatch")
+                        .with_label(
+                            Label::new((self.file.clone(), char_span.clone()))
+                                .with_message(format!(
+                                    "Expected type {}. Found type {}",
+                                    expected_str, found_str
+                                ))
+                                .with_color(Color::Blue),
+                        );
+
+                if let Err(e) = report
                     .finish()
                     .eprint((self.file.clone(), Source::from(source)))
-                    .unwrap();
+                {
+                    eprintln!("Error reporting failed: {}", e);
+                    eprintln!(
+                        "Type mismatch: Expected {}, but found {} in {}",
+                        expected_str, found_str, context
+                    );
+                }
             }
 
             TypeErrorKind::UnboundVariable { name } => {
-                Report::build(ReportKind::Error, (self.file.clone(), self.span.clone()))
-                    .with_code("E002")
-                    .with_message(format!(
-                        "Cannot find variable `{}`",
-                        interner.resolve(*name)
-                    ))
-                    .with_label(
-                        Label::new((self.file.clone(), self.span.clone()))
-                            .with_message("Not found in this scope")
-                            .with_color(Color::Red),
-                    )
-                    .with_help("Did you mean to import it?")
+                eprintln!(
+                    "DEBUG: UnboundVariable error triggered for name: {:?}",
+                    name
+                );
+                let name_str = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    interner.resolve(*name)
+                }))
+                .unwrap_or("<name resolve error>");
+
+                let report =
+                    Report::build(ReportKind::Error, (self.file.clone(), char_span.clone()))
+                        .with_code("E002")
+                        .with_message(format!("Cannot find variable `{}`", name_str))
+                        .with_label(
+                            Label::new((self.file.clone(), char_span.clone()))
+                                .with_message("Not found in this scope")
+                                .with_color(Color::Red),
+                        )
+                        .with_help("Did you mean to import it?");
+
+                if let Err(e) = report
                     .finish()
                     .eprint((self.file.clone(), Source::from(source)))
-                    .unwrap();
+                {
+                    eprintln!("Error reporting failed: {}", e);
+                    eprintln!("Cannot find variable `{}`", name_str);
+                }
             }
 
             TypeErrorKind::ArityMismatch {
@@ -296,51 +368,79 @@ impl TypeError {
                 found,
                 function,
             } => {
-                Report::build(ReportKind::Error, (self.file.clone(), self.span.clone()))
-                    .with_code("E003")
-                    .with_message(format!(
-                        "Function `{}` takes {} arguments but {} were supplied",
-                        interner.resolve(*function),
-                        expected,
-                        found
-                    ))
-                    .with_label(
-                        Label::new((self.file.clone(), self.span.clone()))
-                            .with_message(format!("Expected {} arguments", expected))
-                            .with_color(Color::Red),
-                    )
+                eprintln!("DEBUG: ArityMismatch error triggered");
+                let func_str = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    interner.resolve(*function)
+                }))
+                .unwrap_or("<function resolve error>");
+
+                let report =
+                    Report::build(ReportKind::Error, (self.file.clone(), char_span.clone()))
+                        .with_code("E003")
+                        .with_message(format!(
+                            "Function `{}` takes {} arguments but {} were supplied",
+                            func_str, expected, found
+                        ))
+                        .with_label(
+                            Label::new((self.file.clone(), char_span.clone()))
+                                .with_message(format!("Expected {} arguments", expected))
+                                .with_color(Color::Red),
+                        );
+
+                if let Err(e) = report
                     .finish()
                     .eprint((self.file.clone(), Source::from(source)))
-                    .unwrap();
+                {
+                    eprintln!("Error reporting failed: {}", e);
+                    eprintln!(
+                        "Function `{}` takes {} arguments but {} were supplied",
+                        func_str, expected, found
+                    );
+                }
             }
 
             TypeErrorKind::NonExhaustiveMatch { missing_patterns } => {
-                Report::build(ReportKind::Error, (self.file.clone(), self.span.clone()))
-                    .with_code("E004")
-                    .with_message("Non-exhaustive patterns")
-                    .with_label(
-                        Label::new((self.file.clone(), self.span.clone()))
-                            .with_message(format!(
-                                "Pattern(s) {} not covered",
-                                missing_patterns.join(", ")
-                            ))
-                            .with_color(Color::Red),
-                    )
-                    .with_help(format!("Add patterns for: {}", missing_patterns.join(", ")))
+                eprintln!("DEBUG: NonExhaustiveMatch error triggered");
+                let report =
+                    Report::build(ReportKind::Error, (self.file.clone(), char_span.clone()))
+                        .with_code("E004")
+                        .with_message("Non-exhaustive patterns")
+                        .with_label(
+                            Label::new((self.file.clone(), char_span.clone()))
+                                .with_message(format!(
+                                    "Pattern(s) {} not covered",
+                                    missing_patterns.join(", ")
+                                ))
+                                .with_color(Color::Red),
+                        )
+                        .with_help(format!("Add patterns for: {}", missing_patterns.join(", ")));
+
+                if let Err(e) = report
                     .finish()
                     .eprint((self.file.clone(), Source::from(source)))
-                    .unwrap();
+                {
+                    eprintln!("Error reporting failed: {}", e);
+                    eprintln!("Non-exhaustive patterns: {}", missing_patterns.join(", "));
+                }
             }
 
             _ => {
-                Report::build(ReportKind::Error, (self.file.clone(), self.span.clone()))
-                    .with_message(format!("Type error: {:?}", self.kind))
-                    .with_label(
-                        Label::new((self.file.clone(), self.span.clone())).with_color(Color::Red),
-                    )
+                eprintln!("DEBUG: Other type error triggered: {:?}", self.kind);
+                let report =
+                    Report::build(ReportKind::Error, (self.file.clone(), char_span.clone()))
+                        .with_message(format!("Type error: {:?}", self.kind))
+                        .with_label(
+                            Label::new((self.file.clone(), char_span.clone()))
+                                .with_color(Color::Red),
+                        );
+
+                if let Err(e) = report
                     .finish()
                     .eprint((self.file.clone(), Source::from(source)))
-                    .unwrap();
+                {
+                    eprintln!("Error reporting failed: {}", e);
+                    eprintln!("Type error: {:?}", self.kind);
+                }
             }
         }
     }
@@ -379,15 +479,25 @@ impl Diagnostics {
     pub fn report_all(
         &self,
         interner: &Interner,
+        token_spans: &[std::ops::Range<usize>],
         sources: &std::collections::HashMap<String, String>,
     ) {
-        // Debug print statement removed to avoid invalid interner access
-        // println!("{:?}", self.type_errors);
-
+        // Use the sources HashMap to try to find a file if the error doesn't have one
         // TODO: Sort errors by location for better UX
         for error in &self.type_errors {
-            if let Some(source) = sources.get(&error.file) {
-                error.report(interner, source);
+            if error.file.is_empty() {
+                // If the error doesn't have a file, try to find a source file from the sources map
+                // This may be a fallback to the main file being compiled
+                if let Some((_first_file, first_source)) = sources.iter().next() {
+                    error.report(interner, token_spans, first_source);
+                } else {
+                    error.report(interner, token_spans, "");
+                }
+            } else if let Some(source) = sources.get(&error.file) {
+                error.report(interner, token_spans, source);
+            } else {
+                // Fallback: try to report with empty source
+                error.report(interner, token_spans, "");
             }
         }
 
@@ -699,11 +809,11 @@ impl TypeChecker {
     pub fn new(mut interner: Interner) -> Self {
         let trait_resolver = TraitResolver::new();
 
-        let _int_sym = interner.intern("Int");
-        let _bool_sym = interner.intern("Bool");
-        let _float_sym = interner.intern("Float");
-        let _string_sym = interner.intern("String");
-        let _unit_sym = interner.intern("Unit");
+        let _int_sym = interner.intern("int");
+        let _bool_sym = interner.intern("bool");
+        let _float_sym = interner.intern("float");
+        let _string_sym = interner.intern("string");
+        let _unit_sym = interner.intern("unit");
 
         Self {
             env: TypeEnv::new(),
@@ -1824,7 +1934,7 @@ impl TypeChecker {
 
                 let var_type = if let Some(annot) = type_annot {
                     let expected = self.resolve_type_annot(annot);
-                    self.unify(&value_typed.type_, &expected, &expr.span);
+                    self.unify(&value_typed.type_, &expected, &expr.span, &expr.file);
                     expected
                 } else {
                     // Apply current substitution first, then generalize to capture polymorphism
@@ -1864,12 +1974,14 @@ impl TypeChecker {
 
                 // Determine result type based on operator
                 let result_type = match op {
-                    // Arithmetic operators: Int -> Int -> Int
                     BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
-                        let int_type = self.int_type();
-                        self.unify(&left_typed.type_, &int_type, &left.span);
-                        self.unify(&right_typed.type_, &int_type, &right.span);
-                        int_type
+                        self.unify(
+                            &left_typed.type_,
+                            &right_typed.type_,
+                            &right_typed.span,
+                            &left_typed.file.clone(),
+                        );
+                        left_typed.type_.clone()
                     }
 
                     // Comparison operators: a -> a -> Bool
@@ -1880,15 +1992,30 @@ impl TypeChecker {
                     | BinOp::Greater
                     | BinOp::GreaterEq => {
                         // Both sides must have same type
-                        self.unify(&left_typed.type_, &right_typed.type_, &expr.span);
+                        self.unify(
+                            &left_typed.type_,
+                            &right_typed.type_,
+                            &right_typed.span,
+                            &left_typed.file.clone(),
+                        );
                         self.bool_type()
                     }
 
                     // Logical operators: Bool -> Bool -> Bool
                     BinOp::And | BinOp::Or => {
                         let bool_type = self.bool_type();
-                        self.unify(&left_typed.type_, &bool_type, &left.span);
-                        self.unify(&right_typed.type_, &bool_type, &right.span);
+                        self.unify(
+                            &left_typed.type_,
+                            &bool_type,
+                            &expr.span,
+                            &left_typed.file.clone(),
+                        );
+                        self.unify(
+                            &right_typed.type_,
+                            &bool_type,
+                            &expr.span,
+                            &right_typed.file.clone(),
+                        );
                         bool_type
                     }
 
@@ -1951,7 +2078,7 @@ impl TypeChecker {
                         // idk if this is the issue
                         for (param_type, arg) in params.iter().zip(&args_typed) {
                             println!("unifying args");
-                            self.unify(param_type, &arg.type_, &arg.span);
+                            self.unify(param_type, &arg.type_, &arg.span, &arg.file);
                         }
 
                         // Check if the effects of the called function are allowed by the current context
@@ -1995,7 +2122,12 @@ impl TypeChecker {
                             },
                         });
 
-                        self.unify(&instantiated_func_type, &expected_func_type, &expr.span);
+                        self.unify(
+                            &instantiated_func_type,
+                            &expected_func_type,
+                            &expr.span,
+                            &expr.file,
+                        );
                         let concrete_return = self.substitution.apply(&ret_type);
 
                         TypedExpr {
@@ -2068,13 +2200,13 @@ impl TypeChecker {
                 else_,
             } => {
                 let cond = self.check_expr(condition);
-                self.unify(&cond.type_, &self.bool_type(), &condition.span);
+                self.unify(&cond.type_, &self.bool_type(), &expr.span, &expr.file);
 
                 let then_typed = self.check_expr(then);
                 let else_typed = else_.as_ref().map(|e| self.check_expr(e));
 
                 let ty = if let Some(ref else_t) = else_typed {
-                    self.unify(&then_typed.type_, &else_t.type_, &expr.span);
+                    self.unify(&then_typed.type_, &else_t.type_, &expr.span, &expr.file);
                     then_typed.type_.clone()
                 } else {
                     self.unit_type()
@@ -2166,11 +2298,21 @@ impl TypeChecker {
                         let pattern = self.check_pattern(&arm.pattern, &scrut_typed.type_);
                         let guard = arm.guard.as_ref().map(|g| {
                             let g_typed = self.check_expr(g);
-                            self.unify(&g_typed.type_, &self.bool_type(), &g.span);
+                            self.unify(
+                                &g_typed.type_,
+                                &self.bool_type(),
+                                &g.span,
+                                &g_typed.file.clone(),
+                            );
                             g_typed
                         });
                         let body = self.check_expr(&arm.body);
-                        self.unify(&body.type_, &result_type, &arm.body.span);
+                        self.unify(
+                            &body.type_,
+                            &result_type,
+                            &arm.body.span,
+                            &body.file.clone(),
+                        );
                         self.env.pop_scope();
 
                         TypedMatchArm {
@@ -2220,7 +2362,7 @@ impl TypeChecker {
                 let elem_ty = typed_elems[0].type_.clone();
 
                 for (i, e) in typed_elems.iter().enumerate().skip(1) {
-                    self.unify(&e.type_, &elem_ty, &elements[i].span);
+                    self.unify(&e.type_, &elem_ty, &elements[i].span, &e.file.clone());
                 }
 
                 TypedExpr {
@@ -2253,11 +2395,21 @@ impl TypeChecker {
             ExprKind::Index(target, index) => {
                 let target_typed = self.check_expr(target);
                 let index_typed = self.check_expr(index);
-                self.unify(&index_typed.type_, &self.int_type(), &index.span);
+                self.unify(
+                    &index_typed.type_,
+                    &self.int_type(),
+                    &index.span,
+                    &index_typed.file.clone(),
+                );
 
                 let elem_type = self.fresh_type_var();
                 let expected_array = self.array_type(elem_type.clone());
-                self.unify(&target_typed.type_, &expected_array, &target.span);
+                self.unify(
+                    &target_typed.type_,
+                    &expected_array,
+                    &target.span,
+                    &target_typed.file.clone(),
+                );
 
                 TypedExpr {
                     span: expr.span.clone(),
@@ -2289,7 +2441,12 @@ impl TypeChecker {
                 let operand_typed = self.check_expr(operand);
                 let result_type = match op {
                     UnOp::Not => {
-                        self.unify(&operand_typed.type_, &self.bool_type(), &operand.span);
+                        self.unify(
+                            &operand_typed.type_,
+                            &self.bool_type(),
+                            &operand.span,
+                            &operand_typed.file.clone(),
+                        );
                         self.bool_type()
                     }
                     UnOp::Plus | UnOp::Minus => {
@@ -2299,7 +2456,12 @@ impl TypeChecker {
                     UnOp::Unwrap => {
                         let inner = self.fresh_type_var();
                         let option_ty = self.option_type(inner.clone());
-                        self.unify(&operand_typed.type_, &option_ty, &operand.span);
+                        self.unify(
+                            &operand_typed.type_,
+                            &option_ty,
+                            &operand.span,
+                            &operand_typed.file.clone(),
+                        );
                         inner
                     }
                 };
@@ -2321,11 +2483,21 @@ impl TypeChecker {
 
                 match op {
                     AssignOp::Assign => {
-                        self.unify(&l_typed.type_, &r_typed.type_, &expr.span);
+                        self.unify(
+                            &l_typed.type_,
+                            &r_typed.type_,
+                            &expr.span,
+                            &l_typed.file.clone(),
+                        );
                     }
                     _ => {
                         // AddAssign, SubAssign, etc. - ensure numeric types
-                        self.unify(&l_typed.type_, &r_typed.type_, &expr.span);
+                        self.unify(
+                            &l_typed.type_,
+                            &r_typed.type_,
+                            &expr.span,
+                            &l_typed.file.clone(),
+                        );
                     }
                 }
 
@@ -2366,8 +2538,8 @@ impl TypeChecker {
                 let val_ty = typed_entries[0].1.type_.clone();
 
                 for (i, (k, v)) in typed_entries.iter().enumerate().skip(1) {
-                    self.unify(&k.type_, &key_ty, &entries[i].0.span);
-                    self.unify(&v.type_, &val_ty, &entries[i].1.span);
+                    self.unify(&k.type_, &key_ty, &entries[i].0.span, &k.file.clone());
+                    self.unify(&v.type_, &val_ty, &entries[i].1.span, &v.file.clone());
                 }
 
                 TypedExpr {
@@ -2416,7 +2588,7 @@ impl TypeChecker {
                     } else {
                         // Unify each argument
                         for (arg, expected) in typed_args.iter().zip(variant_types.iter()) {
-                            self.unify(&arg.type_, expected, &arg.span);
+                            self.unify(&arg.type_, expected, &arg.span, &arg.file.clone());
                         }
                     }
 
@@ -2487,7 +2659,12 @@ impl TypeChecker {
                             let typed_field_expr = self.check_expr(field_expr);
 
                             // Unify the field expression type with expected type
-                            self.unify(&typed_field_expr.type_, expected_type, &field_expr.span);
+                            self.unify(
+                                &typed_field_expr.type_,
+                                expected_type,
+                                &field_expr.span,
+                                &typed_field_expr.file.clone(),
+                            );
 
                             typed_fields.push((field_sym, *field_id, typed_field_expr));
                         } else {
@@ -2822,7 +2999,12 @@ impl TypeChecker {
                     }
                 };
 
-                self.unify(&elem_type, &inferred_elem, &iterator.span);
+                self.unify(
+                    &elem_type,
+                    &inferred_elem,
+                    &iterator.span,
+                    &iterator.file.clone(),
+                );
 
                 let binding_id = self.id_gen.fresh_binding();
                 let value_sym = self.interner.intern(value);
@@ -2856,7 +3038,12 @@ impl TypeChecker {
 
             ExprKind::While(condition, body) => {
                 let cond_typed = self.check_expr(condition);
-                self.unify(&cond_typed.type_, &self.bool_type(), &condition.span);
+                self.unify(
+                    &cond_typed.type_,
+                    &self.bool_type(),
+                    &condition.span,
+                    &cond_typed.file.clone(),
+                );
 
                 let body_typed = self.check_expr(body);
 
@@ -2885,7 +3072,12 @@ impl TypeChecker {
 
                 let else_typed = else_.as_ref().map(|e| self.check_expr(e));
                 let result_type = if let Some(ref e) = else_typed {
-                    self.unify(&then_typed.type_, &e.type_, &expr.span);
+                    self.unify(
+                        &then_typed.type_,
+                        &e.type_,
+                        &expr.span,
+                        &then_typed.file.clone(),
+                    );
                     then_typed.type_.clone()
                 } else {
                     self.unit_type()
@@ -3001,7 +3193,7 @@ impl TypeChecker {
 
                         // Check that each argument matches the expected type
                         for (arg, expected_type) in typed_args.iter().zip(params.iter()) {
-                            self.unify(&arg.type_, expected_type, &arg.span);
+                            self.unify(&arg.type_, expected_type, &arg.span, &arg.file.clone());
                         }
 
                         // Add the effect to the current function's allowed effects if not already present
@@ -3180,7 +3372,7 @@ impl TypeChecker {
                     Literal::Bool(_) => self.bool_type(),
                     Literal::String(_) => self.string_type(),
                 };
-                self.unify(&lit_type, expected_ty, &pat.span);
+                self.unify(&lit_type, expected_ty, &pat.span, &pat.file.clone());
 
                 TypedPattern {
                     span: pat.span.clone(),
@@ -3193,7 +3385,7 @@ impl TypeChecker {
             PatKind::Array(patterns) => {
                 let elem_type = self.fresh_type_var();
                 let array_type = self.array_type(elem_type.clone());
-                self.unify(&array_type, expected_ty, &pat.span);
+                self.unify(&array_type, expected_ty, &pat.span, &pat.file.clone());
 
                 let typed_patterns: Vec<_> = patterns
                     .iter()
@@ -3351,8 +3543,18 @@ impl TypeChecker {
             PatKind::Range(start, end) => {
                 let start_typed = self.check_expr(start);
                 let end_typed = self.check_expr(end);
-                self.unify(&start_typed.type_, &end_typed.type_, &pat.span);
-                self.unify(&start_typed.type_, expected_ty, &pat.span);
+                self.unify(
+                    &start_typed.type_,
+                    &end_typed.type_,
+                    &pat.span,
+                    &pat.file.clone(),
+                );
+                self.unify(
+                    &start_typed.type_,
+                    expected_ty,
+                    &pat.span,
+                    &pat.file.clone(),
+                );
 
                 TypedPattern {
                     span: pat.span.clone(),
@@ -3465,7 +3667,7 @@ impl TypeChecker {
                 self.error(
                     &Expr {
                         span: handler.span.clone(),
-                        file: String::new(),
+                        file: handler.body.file.clone(), // Use the handler's body file
                         expr: ExprKind::Error,
                     },
                     TypeErrorKind::UnboundVariable { name: op_sym },
@@ -3497,7 +3699,7 @@ impl TypeChecker {
             self.error(
                 &Expr {
                     span: handler.span.clone(),
-                    file: String::new(),
+                    file: handler.body.file.clone(), // Use the handler's body file
                     expr: ExprKind::Error,
                 },
                 TypeErrorKind::NotAFunction {
@@ -3522,7 +3724,7 @@ impl TypeChecker {
             self.error(
                 &Expr {
                     span: handler.span.clone(),
-                    file: String::new(),
+                    file: handler.body.file.clone(), // Use the handler's body file
                     expr: ExprKind::Error,
                 },
                 TypeErrorKind::ArityMismatch {
@@ -3584,7 +3786,12 @@ impl TypeChecker {
         let body_typed = self.check_expr(&handler.body);
 
         // Unify the resume return type with the body type
-        self.unify(&resume_return_type, &body_typed.type_, &handler.body.span);
+        self.unify(
+            &resume_return_type,
+            &body_typed.type_,
+            &handler.body.span,
+            &handler.body.file.clone(),
+        );
 
         self.env.pop_scope();
 
@@ -3906,19 +4113,39 @@ impl TypeChecker {
         // Now unify the return type with the body type (this happens inside the function type)
         if let (Some(body_typed), Some(_)) = (&body, &func.return_type) {
             // Only unify if return type was explicitly specified
-            self.unify(&body_typed.type_, &return_type, &func.span);
+            self.unify(
+                &body_typed.type_,
+                &return_type,
+                &func.span,
+                &body_typed.file.clone(),
+            );
         } else if let Some(body_typed) = &body {
             // If no return type was specified, the body determines the return type
-            self.unify(&body_typed.type_, &return_type, &func.span);
+            self.unify(
+                &body_typed.type_,
+                &return_type,
+                &func.span,
+                &body_typed.file.clone(),
+            );
         }
 
         // Now unify the return type with the body type (this happens inside the function type)
         if let (Some(body_typed), Some(_)) = (&body, &func.return_type) {
             // Only unify if return type was explicitly specified
-            self.unify(&body_typed.type_, &return_type, &func.span);
+            self.unify(
+                &body_typed.type_,
+                &return_type,
+                &func.span,
+                &body_typed.file.clone(),
+            );
         } else if let Some(body_typed) = &body {
             // If no return type was specified, the body determines the return type
-            self.unify(&body_typed.type_, &return_type, &func.span);
+            self.unify(
+                &body_typed.type_,
+                &return_type,
+                &func.span,
+                &body_typed.file.clone(),
+            );
         }
 
         // Create the function type (after unification)
@@ -4981,7 +5208,7 @@ impl TypeChecker {
         }
     }
 
-    fn unify(&mut self, t1: &Rc<Type>, t2: &Rc<Type>, span: &Range<usize>) {
+    fn unify(&mut self, t1: &Rc<Type>, t2: &Rc<Type>, span: &Range<usize>, file: &str) {
         let t1 = self.substitution.apply(t1);
         let t2 = self.substitution.apply(t2);
 
@@ -4998,7 +5225,7 @@ impl TypeChecker {
                 if self.occurs_check(*id, &t2) {
                     self.diagnostics.add_type_error(TypeError {
                         span: span.clone(),
-                        file: String::new(),
+                        file: file.to_string(),
                         kind: TypeErrorKind::OccursCheck {
                             var: TypeId(*id),
                             in_type: t2,
@@ -5013,7 +5240,7 @@ impl TypeChecker {
                 if self.occurs_check(*id, &t1) {
                     self.diagnostics.add_type_error(TypeError {
                         span: span.clone(),
-                        file: String::new(),
+                        file: file.to_string(),
                         kind: TypeErrorKind::OccursCheck {
                             var: TypeId(*id),
                             in_type: t1,
@@ -5033,7 +5260,7 @@ impl TypeChecker {
                 },
             ) if n1 == n2 && a1.len() == a2.len() => {
                 for (arg1, arg2) in a1.iter().zip(a2.iter()) {
-                    self.unify(arg1, arg2, span);
+                    self.unify(arg1, arg2, span, file);
                 }
             }
 
@@ -5050,26 +5277,25 @@ impl TypeChecker {
                 },
             ) if p1.len() == p2.len() => {
                 for (param1, param2) in p1.iter().zip(p2.iter()) {
-                    self.unify(param1, param2, span);
+                    self.unify(param1, param2, span, file);
                 }
-                self.unify(r1, r2, span);
+                self.unify(r1, r2, span, file);
             }
 
             (TypeKind::Tuple(t1), TypeKind::Tuple(t2)) if t1.len() == t2.len() => {
                 for (ty1, ty2) in t1.iter().zip(t2.iter()) {
-                    self.unify(ty1, ty2, span);
+                    self.unify(ty1, ty2, span, file);
                 }
             }
 
             (TypeKind::Pointer(inner1), TypeKind::Pointer(inner2)) => {
-                self.unify(inner1, inner2, span);
+                self.unify(inner1, inner2, span, file);
             }
 
             _ => {
-                println!("mismatch during unification");
                 self.diagnostics.add_type_error(TypeError {
                     span: span.clone(),
-                    file: String::new(),
+                    file: file.to_string(),
                     kind: TypeErrorKind::TypeMismatch {
                         expected: t1,
                         found: t2,
@@ -5085,7 +5311,7 @@ impl TypeChecker {
             span: None,
             file: None,
             type_: TypeKind::Constructor {
-                name: 0, // intern "Int"
+                name: 0, // intern "int"
                 args: vec![],
                 kind: Kind::Star,
             },
@@ -5157,7 +5383,7 @@ impl TypeChecker {
             span: None,
             file: None,
             type_: TypeKind::Constructor {
-                name: self.interner.intern("Float").0,
+                name: self.interner.intern("float").0,
                 args: vec![],
                 kind: Kind::Star,
             },
@@ -5169,7 +5395,7 @@ impl TypeChecker {
             span: None,
             file: None,
             type_: TypeKind::Constructor {
-                name: self.interner.intern("String").0,
+                name: self.interner.intern("string").0,
                 args: vec![],
                 kind: Kind::Star,
             },

@@ -1,6 +1,7 @@
 pub mod ast;
 pub mod bytecode_validator;
 pub mod desugar;
+pub mod error;
 pub mod lexer;
 pub mod parser;
 pub mod typechecker;

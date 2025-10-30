@@ -1,5 +1,5 @@
-use super::errors::*;
 use crate::ast::*;
+use crate::error::{ErrorReporter, ValidationErrorKind, VialError};
 use crate::lexer::Token;
 use crate::parser;
 use chumsky::prelude::*;
@@ -30,7 +30,7 @@ pub struct ModuleResolver {
     packages_dir: PathBuf,
     loaded_modules: HashMap<PathBuf, Vec<ASTNode>>,
     loading_stack: Vec<PathBuf>,
-    pub diagnostics: ValidationDiagnostics,
+    pub diagnostics: ErrorReporter,
 }
 
 impl ModuleResolver {
@@ -40,7 +40,7 @@ impl ModuleResolver {
             packages_dir: project_root.join("packages"),
             loaded_modules: HashMap::new(),
             loading_stack: Vec::new(),
-            diagnostics: ValidationDiagnostics::new(),
+            diagnostics: ErrorReporter::new(),
         }
     }
 
@@ -56,7 +56,7 @@ impl ModuleResolver {
                                 result.extend(imported_nodes);
                             }
                             Err(e) => {
-                                self.diagnostics.add_error(ValidationError {
+                                self.diagnostics.add_error(VialError::ValidationError {
                                     span: import.span.clone(),
                                     file: import.file.clone(),
                                     kind: e,

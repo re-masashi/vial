@@ -1,4 +1,0 @@
-// Simple test that returns 42
-def pub main() -> int {
-    42
-}
