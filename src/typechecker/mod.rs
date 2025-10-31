@@ -88,7 +88,7 @@ pub enum TypeKind {
 
     // Row polymorphism: { x: Int, y: String | rest }
     Row {
-        fields: Vec<(usize, Rc<Type>)>, // <- Vec instead of HashMap
+        fields: Vec<(usize, Rc<Type>)>,
         rest: Option<usize>,
     },
 
@@ -288,7 +288,7 @@ impl TypeError {
                 found,
                 context,
             } => {
-                eprintln!("DEBUG: TypeMismatch error triggered");
+                // eprintln!("DEBUG: TypeMismatch error triggered");
                 let expected_str =
                     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         expected.display(interner)
@@ -319,7 +319,8 @@ impl TypeError {
                                     expected_str, found_str
                                 ))
                                 .with_color(Color::Blue),
-                        );
+                        )
+                        .with_note(format!("Context: {}", context));
 
                 if let Err(e) = report
                     .finish()
@@ -801,6 +802,11 @@ impl Substitution {
     }
 
     fn bind(&mut self, id: TypeId, ty: Rc<Type>) {
+        // DEBUG: Print when specific type variables that might affect builtin functions are bound
+        if id.0 == 3 || id.0 == 4 || id.0 == 7 {
+            // These are common IDs for builtin types
+            println!("DEBUG: Binding type variable {:?} to type: {:?}", id, ty);
+        }
         self.map.insert(id, ty);
     }
 }
@@ -905,12 +911,60 @@ impl TypeChecker {
         };
         env.enums.insert(result_enum_id, result_info);
 
-        // Register builtin functions
+        // Register builtin functions - ensure types are properly constructed
         // print function: takes a string and returns unit
-        let string_kind = Kind::Star;
-        let unit_kind = Kind::Star;
-
+        // Ensure the print function has the correct signature: string -> unit with IO effect
+        // Create fresh types for each builtin to avoid sharing issues
         let print_func_type = Rc::new(Type {
+            span: None,
+            file: None,
+            type_: TypeKind::Function {
+                params: vec![Rc::new(Type {
+                    span: None,
+                    file: None,
+                    type_: TypeKind::Constructor {
+                        name: interner.intern("string").0, // Named "string" constructor
+                        args: vec![],                      // No type parameters
+                        kind: Kind::Star,                  // Star kind
+                    },
+                })], // Takes 1 parameter: string
+                return_type: Rc::new(Type {
+                    span: None,
+                    file: None,
+                    type_: TypeKind::Constructor {
+                        name: interner.intern("unit").0, // Named "unit" constructor
+                        args: vec![],                    // No type parameters
+                        kind: Kind::Star,                // Star kind
+                    },
+                }), // Returns: unit
+                effects: EffectSet {
+                    effects: vec![interner.intern("IO").0], // Has IO side effect
+                    rest: None,
+                },
+            },
+        });
+
+        let print_binding_id = id_gen.fresh_binding();
+        let print_name = interner.intern("print");
+        let print_binding = Binding {
+            id: print_binding_id,
+            name: print_name,
+            type_: print_func_type,
+            mutable: false,
+        };
+        env.add_binding(print_name, print_binding);
+
+        // Verify it was registered correctly
+        // if let Some(binding) = env.lookup(print_name) {
+        //     println!("DEBUG: At TypeChecker creation, print function registered with type: {:?}", binding.type_);
+        // }
+        // // Also check the println function
+        // if let Some(binding) = env.lookup(println_name) {
+        //     println!("DEBUG: At TypeChecker creation, println function registered with type: {:?}", binding.type_);
+        // }
+
+        // input function: takes a prompt string and returns string
+        let input_func_type = Rc::new(Type {
             span: None,
             file: None,
             type_: TypeKind::Function {
@@ -920,47 +974,22 @@ impl TypeChecker {
                     type_: TypeKind::Constructor {
                         name: interner.intern("string").0,
                         args: vec![],
-                        kind: string_kind.clone(),
+                        kind: Kind::Star,
                     },
                 })],
                 return_type: Rc::new(Type {
                     span: None,
                     file: None,
                     type_: TypeKind::Constructor {
-                        name: interner.intern("unit").0,
-                        args: vec![],
-                        kind: unit_kind.clone(),
-                    },
-                }),
-                effects: EffectSet::pure(), // print is pure effect
-            },
-        });
-
-        let print_binding_id = id_gen.fresh_binding();
-        let print_binding = Binding {
-            id: print_binding_id,
-            name: interner.intern("print"),
-            type_: print_func_type,
-            mutable: false,
-        };
-        env.bindings.insert(print_binding_id, print_binding);
-
-        // input function: takes no arguments and returns string
-        let input_func_type = Rc::new(Type {
-            span: None,
-            file: None,
-            type_: TypeKind::Function {
-                params: vec![],
-                return_type: Rc::new(Type {
-                    span: None,
-                    file: None,
-                    type_: TypeKind::Constructor {
                         name: interner.intern("string").0,
                         args: vec![],
-                        kind: string_kind,
+                        kind: Kind::Star,
                     },
                 }),
-                effects: EffectSet::pure(), // input has side effects but for now consider as pure
+                effects: EffectSet {
+                    effects: vec![interner.intern("IO").0], // input should have IO effect
+                    rest: None,
+                },
             },
         });
 
@@ -971,7 +1000,151 @@ impl TypeChecker {
             type_: input_func_type,
             mutable: false,
         };
-        env.bindings.insert(input_binding_id, input_binding);
+        env.add_binding(interner.intern("input"), input_binding);
+
+        // int_to_string function: takes int and returns string
+        let int_to_string_func_type = Rc::new(Type {
+            span: None,
+            file: None,
+            type_: TypeKind::Function {
+                params: vec![Rc::new(Type {
+                    span: None,
+                    file: None,
+                    type_: TypeKind::Constructor {
+                        name: interner.intern("int").0,
+                        args: vec![],
+                        kind: Kind::Star,
+                    },
+                })],
+                return_type: Rc::new(Type {
+                    span: None,
+                    file: None,
+                    type_: TypeKind::Constructor {
+                        name: interner.intern("string").0,
+                        args: vec![],
+                        kind: Kind::Star,
+                    },
+                }),
+                effects: EffectSet::pure(), // int_to_string is pure
+            },
+        });
+
+        let int_to_string_binding_id = id_gen.fresh_binding();
+        let int_to_string_binding = Binding {
+            id: int_to_string_binding_id,
+            name: interner.intern("int_to_string"),
+            type_: int_to_string_func_type,
+            mutable: false,
+        };
+        env.add_binding(interner.intern("int_to_string"), int_to_string_binding);
+
+        // float_to_string function: takes float and returns string
+        let float_to_string_func_type = Rc::new(Type {
+            span: None,
+            file: None,
+            type_: TypeKind::Function {
+                params: vec![Rc::new(Type {
+                    span: None,
+                    file: None,
+                    type_: TypeKind::Constructor {
+                        name: interner.intern("float").0,
+                        args: vec![],
+                        kind: Kind::Star,
+                    },
+                })],
+                return_type: Rc::new(Type {
+                    span: None,
+                    file: None,
+                    type_: TypeKind::Constructor {
+                        name: interner.intern("string").0,
+                        args: vec![],
+                        kind: Kind::Star,
+                    },
+                }),
+                effects: EffectSet::pure(), // float_to_string is pure
+            },
+        });
+
+        let float_to_string_binding_id = id_gen.fresh_binding();
+        let float_to_string_binding = Binding {
+            id: float_to_string_binding_id,
+            name: interner.intern("float_to_string"),
+            type_: float_to_string_func_type,
+            mutable: false,
+        };
+        env.add_binding(interner.intern("float_to_string"), float_to_string_binding);
+
+        // bool_to_string function: takes bool and returns string
+        let bool_to_string_func_type = Rc::new(Type {
+            span: None,
+            file: None,
+            type_: TypeKind::Function {
+                params: vec![Rc::new(Type {
+                    span: None,
+                    file: None,
+                    type_: TypeKind::Constructor {
+                        name: interner.intern("bool").0,
+                        args: vec![],
+                        kind: Kind::Star,
+                    },
+                })],
+                return_type: Rc::new(Type {
+                    span: None,
+                    file: None,
+                    type_: TypeKind::Constructor {
+                        name: interner.intern("string").0,
+                        args: vec![],
+                        kind: Kind::Star,
+                    },
+                }),
+                effects: EffectSet::pure(), // bool_to_string is pure
+            },
+        });
+
+        let bool_to_string_binding_id = id_gen.fresh_binding();
+        let bool_to_string_binding = Binding {
+            id: bool_to_string_binding_id,
+            name: interner.intern("bool_to_string"),
+            type_: bool_to_string_func_type,
+            mutable: false,
+        };
+        env.add_binding(interner.intern("bool_to_string"), bool_to_string_binding);
+
+        // typeof function: takes any type and returns string
+        let typeof_func_type = Rc::new(Type {
+            span: None,
+            file: None,
+            type_: TypeKind::Function {
+                params: vec![Rc::new(Type {
+                    span: None,
+                    file: None,
+                    type_: TypeKind::Variable {
+                        // Generic type parameter
+                        id: id_gen.fresh_type().0,
+                        kind: Kind::Star,
+                    },
+                })],
+                return_type: Rc::new(Type {
+                    span: None,
+                    file: None,
+                    type_: TypeKind::Constructor {
+                        name: interner.intern("string").0,
+                        args: vec![],
+                        kind: Kind::Star,
+                    },
+                }),
+                effects: EffectSet::pure(), // typeof is pure
+            },
+        });
+
+        let typeof_binding_id = id_gen.fresh_binding();
+        let typeof_binding = Binding {
+            id: typeof_binding_id,
+            name: interner.intern("typeof"),
+            type_: typeof_func_type,
+            mutable: false,
+        };
+        env.add_binding(interner.intern("typeof"), typeof_binding);
 
         Self {
             env,
@@ -2043,25 +2216,217 @@ impl TypeChecker {
 
             ExprKind::Variable(name) => {
                 let sym = self.interner.intern(name);
-                match self.env.lookup(sym) {
-                    Some(binding) => {
-                        let binding = binding.clone();
-                        // Instantiate polymorphic type - this should create fresh type variables for Forall types
-                        let instantiated = self.instantiate(&binding.type_);
-
-                        TypedExpr {
-                            span: expr.span.clone(),
-                            file: expr.file.clone(),
-                            expr: TypedExprKind::Variable {
-                                name: sym,
-                                binding_id: binding.id,
+                // Special handling for known built-in functions to avoid corruption
+                if name == "print"
+                    || name == "input"
+                    || name == "typeof"
+                    || name == "int_to_string"
+                    || name == "float_to_string"
+                    || name == "bool_to_string"
+                {
+                    let builtin_type = if name == "print" {
+                        // print/println: string -> unit with IO effect
+                        Rc::new(Type {
+                            span: None,
+                            file: None,
+                            type_: TypeKind::Function {
+                                params: vec![Rc::new(Type {
+                                    span: None,
+                                    file: None,
+                                    type_: TypeKind::Constructor {
+                                        name: self.interner.intern("string").0,
+                                        args: vec![],
+                                        kind: Kind::Star,
+                                    },
+                                })],
+                                return_type: Rc::new(Type {
+                                    span: None,
+                                    file: None,
+                                    type_: TypeKind::Constructor {
+                                        name: self.interner.intern("unit").0,
+                                        args: vec![],
+                                        kind: Kind::Star,
+                                    },
+                                }),
+                                effects: EffectSet {
+                                    effects: vec![self.interner.intern("IO").0],
+                                    rest: None,
+                                },
                             },
-                            type_: instantiated,
-                        }
+                        })
+                    } else if name == "input" {
+                        // input: string -> string with IO effect (takes prompt, returns input)
+                        Rc::new(Type {
+                            span: None,
+                            file: None,
+                            type_: TypeKind::Function {
+                                params: vec![Rc::new(Type {
+                                    span: None,
+                                    file: None,
+                                    type_: TypeKind::Constructor {
+                                        name: self.interner.intern("string").0,
+                                        args: vec![],
+                                        kind: Kind::Star,
+                                    },
+                                })],
+                                return_type: Rc::new(Type {
+                                    span: None,
+                                    file: None,
+                                    type_: TypeKind::Constructor {
+                                        name: self.interner.intern("string").0,
+                                        args: vec![],
+                                        kind: Kind::Star,
+                                    },
+                                }),
+                                effects: EffectSet {
+                                    effects: vec![self.interner.intern("IO").0],
+                                    rest: None,
+                                },
+                            },
+                        })
+                    } else if name == "typeof" {
+                        // typeof: 'a -> string (pure function)
+                        Rc::new(Type {
+                            span: None,
+                            file: None,
+                            type_: TypeKind::Function {
+                                params: vec![Rc::new(Type {
+                                    span: None,
+                                    file: None,
+                                    type_: TypeKind::Variable {
+                                        id: self.id_gen.fresh_type().0,
+                                        kind: Kind::Star,
+                                    },
+                                })],
+                                return_type: Rc::new(Type {
+                                    span: None,
+                                    file: None,
+                                    type_: TypeKind::Constructor {
+                                        name: self.interner.intern("string").0,
+                                        args: vec![],
+                                        kind: Kind::Star,
+                                    },
+                                }),
+                                effects: EffectSet::pure(), // pure function
+                            },
+                        })
+                    } else if name == "int_to_string" {
+                        // int_to_string: int -> string (pure function)
+                        Rc::new(Type {
+                            span: None,
+                            file: None,
+                            type_: TypeKind::Function {
+                                params: vec![Rc::new(Type {
+                                    span: None,
+                                    file: None,
+                                    type_: TypeKind::Constructor {
+                                        name: self.interner.intern("int").0,
+                                        args: vec![],
+                                        kind: Kind::Star,
+                                    },
+                                })],
+                                return_type: Rc::new(Type {
+                                    span: None,
+                                    file: None,
+                                    type_: TypeKind::Constructor {
+                                        name: self.interner.intern("string").0,
+                                        args: vec![],
+                                        kind: Kind::Star,
+                                    },
+                                }),
+                                effects: EffectSet::pure(), // pure function
+                            },
+                        })
+                    } else if name == "float_to_string" {
+                        // float_to_string: float -> string (pure function)
+                        Rc::new(Type {
+                            span: None,
+                            file: None,
+                            type_: TypeKind::Function {
+                                params: vec![Rc::new(Type {
+                                    span: None,
+                                    file: None,
+                                    type_: TypeKind::Constructor {
+                                        name: self.interner.intern("float").0,
+                                        args: vec![],
+                                        kind: Kind::Star,
+                                    },
+                                })],
+                                return_type: Rc::new(Type {
+                                    span: None,
+                                    file: None,
+                                    type_: TypeKind::Constructor {
+                                        name: self.interner.intern("string").0,
+                                        args: vec![],
+                                        kind: Kind::Star,
+                                    },
+                                }),
+                                effects: EffectSet::pure(), // pure function
+                            },
+                        })
+                    } else if name == "bool_to_string" {
+                        // bool_to_string: bool -> string (pure function)
+                        Rc::new(Type {
+                            span: None,
+                            file: None,
+                            type_: TypeKind::Function {
+                                params: vec![Rc::new(Type {
+                                    span: None,
+                                    file: None,
+                                    type_: TypeKind::Constructor {
+                                        name: self.interner.intern("bool").0,
+                                        args: vec![],
+                                        kind: Kind::Star,
+                                    },
+                                })],
+                                return_type: Rc::new(Type {
+                                    span: None,
+                                    file: None,
+                                    type_: TypeKind::Constructor {
+                                        name: self.interner.intern("string").0,
+                                        args: vec![],
+                                        kind: Kind::Star,
+                                    },
+                                }),
+                                effects: EffectSet::pure(), // pure function
+                            },
+                        })
+                    } else {
+                        // Fallback for any other unexpected builtin
+                        self.fresh_type_var()
+                    };
+
+                    TypedExpr {
+                        span: expr.span.clone(),
+                        file: expr.file.clone(),
+                        expr: TypedExprKind::Variable {
+                            name: sym,
+                            binding_id: self.id_gen.fresh_binding(), // Create a new binding ID for safety
+                        },
+                        type_: builtin_type,
                     }
-                    None => {
-                        self.error(expr, TypeErrorKind::UnboundVariable { name: sym });
-                        self.error_expr(expr)
+                } else {
+                    // Handle regular variables normally
+                    match self.env.lookup(sym) {
+                        Some(binding) => {
+                            let binding = binding.clone();
+                            // Instantiate polymorphic type - this should create fresh type variables for Forall types
+                            let instantiated = self.instantiate(&binding.type_);
+
+                            TypedExpr {
+                                span: expr.span.clone(),
+                                file: expr.file.clone(),
+                                expr: TypedExprKind::Variable {
+                                    name: sym,
+                                    binding_id: binding.id,
+                                },
+                                type_: instantiated,
+                            }
+                        }
+                        None => {
+                            self.error(expr, TypeErrorKind::UnboundVariable { name: sym });
+                            self.error_expr(expr)
+                        }
                     }
                 }
             }
@@ -2086,6 +2451,7 @@ impl TypeChecker {
 
                 let binding_id = self.id_gen.fresh_binding();
                 let sym = self.interner.intern(var);
+
                 self.env.add_binding(
                     sym,
                     Binding {
@@ -2198,6 +2564,9 @@ impl TypeChecker {
                         effects,
                     } => {
                         if params.len() != args_typed.len() {
+                            println!("len args in ast: {:?}", args_typed.len());
+                            println!("len args in typeenv: {:?}", params.len());
+
                             self.diagnostics.add_type_error(TypeError {
                                 span: expr.span.clone(),
                                 file: expr.file.clone(),
@@ -2218,7 +2587,6 @@ impl TypeChecker {
 
                         // idk if this is the issue
                         for (param_type, arg) in params.iter().zip(&args_typed) {
-                            println!("unifying args");
                             self.unify(param_type, &arg.type_, &arg.span, &arg.file);
                         }
 

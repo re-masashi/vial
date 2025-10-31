@@ -94,19 +94,22 @@ impl UntypedValidator {
         for node in nodes {
             match node.node {
                 ASTNodeKind::Expr(expr) => {
-                    match expr.expr {
+                    // Desugar builtin macros in expressions first
+                    let desugared_expr = self.desugar_builtin_macros(expr);
+
+                    match desugared_expr.expr {
                         ExprKind::Import(_) => {
                             // `import` expressions should NEVER be treated as "executable" (idk a better term for this) expressions
                             // they should remain as separate nodes to be processed during import resolution
                             other_nodes.push(ASTNode {
                                 span: node.span.clone(),
                                 file: node.file.clone(),
-                                node: ASTNodeKind::Expr(expr),
+                                node: ASTNodeKind::Expr(desugared_expr),
                                 attributes: node.attributes.clone(),
                             });
                         }
                         _ => {
-                            exprs.push(expr);
+                            exprs.push(desugared_expr);
                         }
                     }
                 }
@@ -171,6 +174,491 @@ impl UntypedValidator {
         other_nodes
     }
 
+    fn desugar_builtin_macros(&self, expr: Expr) -> Expr {
+        let new_expr_kind = match expr.expr {
+            ExprKind::MacroCall(ref name, ref args, ref delimiter) => {
+                match name.as_str() {
+                    "println!" | "println" | "print!" | "print" => {
+                        // Desugar println! and print! macros
+                        let desugared_args: Vec<_> = args
+                            .iter()
+                            .cloned()
+                            .map(|arg| self.desugar_expr_in_macro(&arg))
+                            .collect();
+
+                        // Create a sequence of type conversions and concatenations:
+                        // For println!("Hello", x, y), we convert each arg to string and concatenate them
+                        if desugared_args.is_empty() {
+                            // If no args, just print an empty string (or newline for println)
+                            let print_string = if name == "println!" || name == "println" {
+                                ExprKind::String("\n".to_string())
+                            } else {
+                                ExprKind::String("".to_string())
+                            };
+                            ExprKind::Call(
+                                Box::new(Expr {
+                                    span: expr.span.clone(),
+                                    file: expr.file.clone(),
+                                    expr: ExprKind::Variable("print".to_string()),
+                                }),
+                                vec![Expr {
+                                    span: expr.span.clone(),
+                                    file: expr.file.clone(),
+                                    expr: print_string,
+                                }],
+                            )
+                        } else {
+                            // Convert each argument to string and concatenate them
+                            let mut concat_expr: Option<Expr> = None;
+                            for (i, arg) in desugared_args.iter().enumerate() {
+                                let converted_arg = self.convert_expr_to_string(arg, &expr);
+
+                                if i == 0 {
+                                    concat_expr = Some(converted_arg.clone());
+                                } else {
+                                    concat_expr = Some(Expr {
+                                        span: expr.span.clone(),
+                                        file: expr.file.clone(),
+                                        expr: ExprKind::BinOp(
+                                            Box::new(concat_expr.unwrap()),
+                                            BinOp::Add, // String concatenation
+                                            Box::new(converted_arg.clone()),
+                                        ),
+                                    });
+                                }
+                            }
+
+                            // If it's println! or println, also concatenate a newline character
+                            if name == "println!" || name == "println" {
+                                concat_expr = Some(Expr {
+                                    span: expr.span.clone(),
+                                    file: expr.file.clone(),
+                                    expr: ExprKind::BinOp(
+                                        Box::new(concat_expr.unwrap()),
+                                        BinOp::Add,
+                                        Box::new(Expr {
+                                            span: expr.span.clone(),
+                                            file: expr.file.clone(),
+                                            expr: ExprKind::String("\n".to_string()),
+                                        }),
+                                    ),
+                                });
+                            }
+
+                            // Call the print function with the concatenated string
+                            ExprKind::Call(
+                                Box::new(Expr {
+                                    span: expr.span.clone(),
+                                    file: expr.file.clone(),
+                                    expr: ExprKind::Variable("print".to_string()),
+                                }),
+                                vec![concat_expr.unwrap()],
+                            )
+                        }
+                    }
+                    "typeof!" | "typeof" => {
+                        // typeof! macro: returns the string representation of the type of the argument
+                        if args.len() != 1 {
+                            // This error should ideally be caught at type checking, but we add it here for safety
+                            ExprKind::String("error".to_string()) // Return an error string
+                        } else {
+                            // For typeof!, we need to get the type string. Since this happens after type checking,
+                            // in the desugaring phase, we'll create a call to a builtin typeof function
+                            // This will be handled properly in the typechecker but desugared here
+                            let desugared_arg = self.desugar_expr_in_macro(&args[0]);
+
+                            ExprKind::Call(
+                                Box::new(Expr {
+                                    span: expr.span.clone(),
+                                    file: expr.file.clone(),
+                                    expr: ExprKind::Variable("typeof".to_string()),
+                                }),
+                                vec![desugared_arg],
+                            )
+                        }
+                    }
+                    "input!" | "input" => {
+                        // input! macro: returns user input as a string
+                        if !args.is_empty() {
+                            // This error should ideally be caught at type checking, but we add it here for safety
+                            ExprKind::String("".to_string()) // Return empty string for safety
+                        } else {
+                            // Create a call to the builtin input function
+                            ExprKind::Call(
+                                Box::new(Expr {
+                                    span: expr.span.clone(),
+                                    file: expr.file.clone(),
+                                    expr: ExprKind::Variable("input".to_string()),
+                                }),
+                                vec![], // input! takes no arguments
+                            )
+                        }
+                    }
+                    _ => {
+                        // For non-builtin macros, just desugar the arguments (but built-in macros shouldn't reach here in the normal flow since they're handled elsewhere)
+                        let new_args = args
+                            .iter()
+                            .cloned()
+                            .map(|arg| self.desugar_expr_in_macro(&arg))
+                            .collect();
+                        ExprKind::MacroCall(name.to_string(), new_args, delimiter.clone())
+                    }
+                }
+            }
+
+            // For non-macro expressions, recursively desugar if needed
+            ExprKind::Block(expressions) => {
+                let new_expressions = expressions
+                    .into_iter()
+                    .map(|e| self.desugar_builtin_macros(e))
+                    .collect();
+                ExprKind::Block(new_expressions)
+            }
+
+            ExprKind::Let {
+                var,
+                type_annot,
+                value,
+            } => {
+                let desugared_value = self.desugar_builtin_macros(*value);
+                ExprKind::Let {
+                    var,
+                    type_annot,
+                    value: Box::new(desugared_value),
+                }
+            }
+
+            ExprKind::IfElse {
+                condition,
+                then,
+                else_,
+            } => {
+                let desugared_condition = self.desugar_builtin_macros(*condition);
+                let desugared_then = self.desugar_builtin_macros(*then);
+                let desugared_else = else_.map(|e| self.desugar_builtin_macros(*e)).map(Box::new);
+
+                ExprKind::IfElse {
+                    condition: Box::new(desugared_condition),
+                    then: Box::new(desugared_then),
+                    else_: desugared_else,
+                }
+            }
+
+            ExprKind::Match(scrutinee, arms) => {
+                let desugared_scrutinee = self.desugar_builtin_macros(*scrutinee);
+                let new_arms = arms
+                    .into_iter()
+                    .map(|arm| MatchArm {
+                        pattern: arm.pattern, // Don't desugar patterns
+                        guard: arm.guard.map(|e| self.desugar_builtin_macros(e)),
+                        body: Box::new(self.desugar_builtin_macros(*arm.body)),
+                        span: arm.span,
+                    })
+                    .collect();
+
+                ExprKind::Match(Box::new(desugared_scrutinee), new_arms)
+            }
+
+            ExprKind::BinOp(left, op, right) => {
+                let desugared_left = self.desugar_builtin_macros(*left);
+                let desugared_right = self.desugar_builtin_macros(*right);
+                ExprKind::BinOp(Box::new(desugared_left), op, Box::new(desugared_right))
+            }
+
+            ExprKind::UnOp(op, operand) => {
+                let desugared_operand = self.desugar_builtin_macros(*operand);
+                ExprKind::UnOp(op, Box::new(desugared_operand))
+            }
+
+            ExprKind::Call(function, args) => {
+                let desugared_function = self.desugar_builtin_macros(*function);
+                let desugared_args: Vec<Expr> = args
+                    .into_iter()
+                    .map(|e| self.desugar_builtin_macros(e))
+                    .collect();
+
+                ExprKind::Call(Box::new(desugared_function), desugared_args)
+            }
+
+            ExprKind::Array(elements) => {
+                let new_elements = elements
+                    .into_iter()
+                    .map(|e| self.desugar_builtin_macros(e))
+                    .collect();
+                ExprKind::Array(new_elements)
+            }
+
+            ExprKind::Tuple(elements) => {
+                let new_elements = elements
+                    .into_iter()
+                    .map(|e| self.desugar_builtin_macros(e))
+                    .collect();
+                ExprKind::Tuple(new_elements)
+            }
+
+            ExprKind::FieldAccess(target, field) => {
+                let desugared_target = self.desugar_builtin_macros(*target);
+                ExprKind::FieldAccess(Box::new(desugared_target), field)
+            }
+
+            ExprKind::OptionalChain(target, field) => {
+                let desugared_target = self.desugar_builtin_macros(*target);
+                ExprKind::OptionalChain(Box::new(desugared_target), field)
+            }
+
+            ExprKind::Index(target, index) => {
+                let desugared_target = self.desugar_builtin_macros(*target);
+                let desugared_index = self.desugar_builtin_macros(*index);
+                ExprKind::Index(Box::new(desugared_target), Box::new(desugared_index))
+            }
+
+            ExprKind::Return(value) => {
+                let desugared_value = value.map(|v| Box::new(self.desugar_builtin_macros(*v)));
+                ExprKind::Return(desugared_value)
+            }
+
+            ExprKind::Break(value) => {
+                let desugared_value = value.map(|v| Box::new(self.desugar_builtin_macros(*v)));
+                ExprKind::Break(desugared_value)
+            }
+
+            ExprKind::Assign { l_val, r_val, op } => {
+                let desugared_l_val = self.desugar_builtin_macros(*l_val);
+                let desugared_r_val = self.desugar_builtin_macros(*r_val);
+                ExprKind::Assign {
+                    l_val: Box::new(desugared_l_val),
+                    r_val: Box::new(desugared_r_val),
+                    op,
+                }
+            }
+
+            ExprKind::Map(entries) => {
+                let new_entries = entries
+                    .into_iter()
+                    .map(|(k, v)| {
+                        (
+                            self.desugar_builtin_macros(k),
+                            self.desugar_builtin_macros(v),
+                        )
+                    })
+                    .collect();
+                ExprKind::Map(new_entries)
+            }
+
+            ExprKind::EnumConstruct {
+                name,
+                variant,
+                args,
+            } => {
+                let new_args = args
+                    .into_iter()
+                    .map(|e| self.desugar_builtin_macros(e))
+                    .collect();
+                ExprKind::EnumConstruct {
+                    name,
+                    variant,
+                    args: new_args,
+                }
+            }
+
+            ExprKind::StructConstruct { name, fields } => {
+                let new_fields = fields
+                    .into_iter()
+                    .map(|(field_name, expr)| (field_name, self.desugar_builtin_macros(expr)))
+                    .collect();
+                ExprKind::StructConstruct {
+                    name,
+                    fields: new_fields,
+                }
+            }
+
+            ExprKind::Cast { expr, target_type } => {
+                let desugared_expr = self.desugar_builtin_macros(*expr);
+                ExprKind::Cast {
+                    expr: Box::new(desugared_expr),
+                    target_type,
+                }
+            }
+
+            ExprKind::With { context, var, body } => {
+                let desugared_context = self.desugar_builtin_macros(*context);
+                let desugared_body = self.desugar_builtin_macros(*body);
+                ExprKind::With {
+                    context: Box::new(desugared_context),
+                    var,
+                    body: Box::new(desugared_body),
+                }
+            }
+
+            ExprKind::Loop { label, body } => {
+                let desugared_body = self.desugar_builtin_macros(*body);
+                ExprKind::Loop {
+                    label,
+                    body: Box::new(desugared_body),
+                }
+            }
+
+            ExprKind::For {
+                iterator,
+                value,
+                expression,
+            } => {
+                let desugared_iterator = self.desugar_builtin_macros(*iterator);
+                let desugared_body = self.desugar_builtin_macros(*expression);
+                ExprKind::For {
+                    iterator: Box::new(desugared_iterator),
+                    value,
+                    expression: Box::new(desugared_body),
+                }
+            }
+
+            ExprKind::While(condition, body) => {
+                let desugared_condition = self.desugar_builtin_macros(*condition);
+                let desugared_body = self.desugar_builtin_macros(*body);
+                ExprKind::While(Box::new(desugared_condition), Box::new(desugared_body))
+            }
+
+            ExprKind::IfLet {
+                pattern,
+                expr,
+                then,
+                else_,
+            } => {
+                let desugared_expr = self.desugar_builtin_macros(*expr);
+                let desugared_then = self.desugar_builtin_macros(*then);
+                let desugared_else = else_.map(|e| self.desugar_builtin_macros(*e)).map(Box::new);
+
+                ExprKind::IfLet {
+                    pattern, // Don't desugar pattern
+                    expr: Box::new(desugared_expr),
+                    then: Box::new(desugared_then),
+                    else_: desugared_else,
+                }
+            }
+
+            ExprKind::WhileLet {
+                pattern,
+                expr,
+                body,
+            } => {
+                let desugared_expr = self.desugar_builtin_macros(*expr);
+                let desugared_body = self.desugar_builtin_macros(*body);
+
+                ExprKind::WhileLet {
+                    pattern, // Don't desugar pattern
+                    expr: Box::new(desugared_expr),
+                    body: Box::new(desugared_body),
+                }
+            }
+
+            ExprKind::Perform { effect, args } => {
+                let new_args = args
+                    .into_iter()
+                    .map(|e| self.desugar_builtin_macros(e))
+                    .collect();
+                ExprKind::Perform {
+                    effect,
+                    args: new_args,
+                }
+            }
+
+            ExprKind::Handle { body, handlers } => {
+                let desugared_body = self.desugar_builtin_macros(*body);
+                let new_handlers = handlers
+                    .into_iter()
+                    .map(|handler| EffectHandler {
+                        span: handler.span,
+                        effect: handler.effect,
+                        params: handler.params,
+                        resume_param: handler.resume_param,
+                        body: self.desugar_builtin_macros(handler.body),
+                    })
+                    .collect();
+
+                ExprKind::Handle {
+                    body: Box::new(desugared_body),
+                    handlers: new_handlers,
+                }
+            }
+
+            ExprKind::Lambda { args, expression } => {
+                let desugared_body = self.desugar_builtin_macros(*expression);
+                ExprKind::Lambda {
+                    args,
+                    expression: Box::new(desugared_body),
+                }
+            }
+
+            // Primitive values - no desugaring needed
+            ExprKind::Int(_)
+            | ExprKind::Float(_)
+            | ExprKind::Bool(_)
+            | ExprKind::String(_)
+            | ExprKind::Variable(_)
+            | ExprKind::Continue
+            | ExprKind::Error
+            | ExprKind::Import(_) => {
+                expr.expr // Keep as is
+            }
+        };
+
+        Expr {
+            span: expr.span,
+            file: expr.file,
+            expr: new_expr_kind,
+        }
+    }
+
+    fn desugar_expr_in_macro(&self, expr: &Expr) -> Expr {
+        // This is a helper function to desugar expressions within macro arguments
+        self.desugar_builtin_macros(expr.clone())
+    }
+
+    // Helper function to convert an expression to a string representation
+    fn convert_expr_to_string(&self, expr: &Expr, original_expr: &Expr) -> Expr {
+        // Determine the type of the expression and apply the appropriate conversion
+        match &expr.expr {
+            ExprKind::Int(_) => Expr {
+                span: expr.span.clone(),
+                file: expr.file.clone(),
+                expr: ExprKind::Call(
+                    Box::new(Expr {
+                        span: original_expr.span.clone(),
+                        file: original_expr.file.clone(),
+                        expr: ExprKind::Variable("int_to_string".to_string()),
+                    }),
+                    vec![expr.clone()],
+                ),
+            },
+            ExprKind::Float(_) => Expr {
+                span: expr.span.clone(),
+                file: expr.file.clone(),
+                expr: ExprKind::Call(
+                    Box::new(Expr {
+                        span: original_expr.span.clone(),
+                        file: original_expr.file.clone(),
+                        expr: ExprKind::Variable("float_to_string".to_string()),
+                    }),
+                    vec![expr.clone()],
+                ),
+            },
+            ExprKind::Bool(_) => Expr {
+                span: expr.span.clone(),
+                file: expr.file.clone(),
+                expr: ExprKind::Call(
+                    Box::new(Expr {
+                        span: original_expr.span.clone(),
+                        file: original_expr.file.clone(),
+                        expr: ExprKind::Variable("bool_to_string".to_string()),
+                    }),
+                    vec![expr.clone()],
+                ),
+            },
+            // For strings and other types that are already strings or can be handled directly
+            _ => expr.clone(),
+        }
+    }
+
     fn create_main_function(&self, exprs: Vec<Expr>) -> ASTNode {
         let block_expr = Expr {
             span: if exprs.is_empty() {
@@ -203,7 +691,7 @@ impl UntypedValidator {
             args: vec![],
             return_type: None,
             where_constraints: vec![],
-            effects: EffectAnnot::pure(),
+            effects: EffectAnnot::closed_simple(vec!["IO".to_string()]),
             body: Some(block_expr),
         };
 

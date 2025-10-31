@@ -71,12 +71,13 @@ fn main() {
 
     let mut ast = ast.expect("No AST produced despite no errors");
 
-    println!("PRE FILE NAME: {:#?}", ast);
+    // println!("PRE FILE NAME: {:#?}", ast);
 
-    // Set file names in the AST
+    // FIXME: i have a feeling that this might misbehave when programs have imports.
+    // instead, pass file names to parser functions.
     set_file_names_in_ast(&mut ast, filename);
 
-    println!("POST FILE NAME: {:#?}", ast);
+    // println!("POST FILE NAME: {:#?}", ast);
 
     println!("[3/7] Validating untyped AST...");
     let mut validator = UntypedValidator::new(project_root);
@@ -167,7 +168,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    println!("\n✓ Compilation successful!");
+    println!("\nCompilation successful!");
     println!("  File: {}", filename);
 
     // Add VM execution

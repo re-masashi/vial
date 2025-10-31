@@ -647,10 +647,16 @@ impl BytecodeCompiler {
 
                 // Map builtin function name to builtin ID
                 let builtin_id = match builtin_name.as_str() {
-                    "print" => 0, // BUILTIN_PRINT
-                    "input" => 1, // BUILTIN_INPUT
-                    // Could add more builtin mappings if needed
-                    _ => 0, // Default to 0 if not known
+                    "print" => 0,           // BUILTIN_PRINT
+                    "input" => 1,           // BUILTIN_INPUT
+                    "int_to_string" => 2,   // BUILTIN_INT_TO_STRING
+                    "float_to_string" => 3, // BUILTIN_FLOAT_TO_STRING
+                    "bool_to_string" => 4,  // BUILTIN_BOOL_TO_STRING
+                    "typeof" => 5,          // BUILTIN_TYPEOF
+                    _ => {
+                        eprintln!("Unknown builtin function: {}", builtin_name);
+                        0 // Default to 0 if not known
+                    }
                 };
 
                 // Emit CallBuiltin instruction
@@ -2129,6 +2135,39 @@ impl BytecodeCompiler {
                 self.emit_u8(reg);
                 reg
             }
+            IRValue::String(s) => {
+                // For string literals, we need to store the string in the constant pool
+                // and return an index to it
+                let reg = self.next_register;
+                self.next_register += 1;
+
+                // Add the string to the constant pool and get its index
+                // The format is: [length: u32][string_bytes]
+                let bytes = s.as_bytes();
+                let len_bytes = (bytes.len() as u32).to_le_bytes();
+                self.constant_pool.extend_from_slice(&len_bytes);
+                self.constant_pool.extend_from_slice(bytes);
+
+                // The index of this string in the constant pool (before we added it)
+                let string_index = self.constant_pool.len() - bytes.len() - 4;
+
+                // Emit instruction to load the string index into the register
+                if string_index <= 127 {
+                    self.emit_u8(0xC3); // MoveImm8
+                    self.emit_u8(reg);
+                    self.emit_u8(string_index as u8);
+                } else if string_index <= 32767 {
+                    self.emit_u8(0xC2); // MoveImm16
+                    self.emit_u8(reg);
+                    self.emit_u16_le(string_index as u16);
+                } else {
+                    self.emit_u8(0xC4); // MoveImm64
+                    self.emit_u8(reg);
+                    self.emit_i64_le(string_index as i64);
+                }
+
+                reg
+            }
             _ => 0, // Default to register 0
         }
     }
@@ -2139,6 +2178,7 @@ impl BytecodeCompiler {
             IRValue::Int(_) => IRType::Int,
             IRValue::Float(_) => IRType::Float,
             IRValue::Bool(_) => IRType::Bool,
+            IRValue::String(_) => IRType::String,
             IRValue::SSA(_) => IRType::Int, // Default assumption
             _ => IRType::Int,               // Default assumption
         }

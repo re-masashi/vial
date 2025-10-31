@@ -1913,7 +1913,13 @@ impl<'a> FunctionBuilder<'a> {
             TypedExprKind::Variable { name, .. } => {
                 // Check if it's a builtin function
                 let builtin_name = self.builder.interner.resolve(*name).to_string();
-                if builtin_name == "print" || builtin_name == "input" {
+                if builtin_name == "print"
+                    || builtin_name == "input"
+                    || builtin_name == "int_to_string"
+                    || builtin_name == "float_to_string"
+                    || builtin_name == "bool_to_string"
+                    || builtin_name == "typeof"
+                {
                     // Generate CallBuiltin instruction for builtin functions
                     self.emit(IRInstruction::CallBuiltin {
                         result,
