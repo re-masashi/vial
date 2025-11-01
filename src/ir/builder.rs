@@ -1344,13 +1344,29 @@ impl<'a> FunctionBuilder<'a> {
                 expr: scrutinee,
                 body,
             } => self.lower_while_let(pattern, scrutinee, body, &expr.span, &expr.file),
-            TypedExprKind::MacroCall {
-                name: _,
-                macro_id: _,
-                args: _,
-                delimiter: _,
-            } => {
-                unreachable!()
+            TypedExprKind::MacroCall { name, args, .. } => {
+                let macro_name = self.builder.interner.resolve(*name).to_string();
+
+                // Handle builtin macros by converting them to function calls
+                match macro_name.as_str() {
+                    "print!" | "print" => {
+                        // Convert print! macro to print function call
+                        self.lower_builtin_macro_call("print", args, &expr.span, &expr.file)
+                    }
+                    "println!" | "println" => {
+                        // Convert println! macro to print function call (with potential newline)
+                        self.lower_builtin_macro_call("print", args, &expr.span, &expr.file)
+                    }
+                    "input!" | "input" => {
+                        // Convert input! macro to input function call
+                        self.lower_builtin_macro_call("input", args, &expr.span, &expr.file)
+                    }
+                    _ => {
+                        // For other macros, this shouldn't happen if the type checker worked properly
+                        // But just in case, we'll make a best effort to handle it
+                        IRValue::Unit
+                    }
+                }
             }
             TypedExprKind::Error => {
                 unreachable!()
@@ -2897,5 +2913,32 @@ impl<'a> FunctionBuilder<'a> {
             .last()
             .expect("Continue without loop")
             .continue_target
+    }
+
+    fn lower_builtin_macro_call(
+        &mut self,
+        func_name: &str,
+        args: &[TypedExpr],
+        span: &Range<usize>,
+        file: &str,
+    ) -> IRValue {
+        // Convert the arguments
+        let arg_values: Vec<_> = args.iter().map(|arg| self.lower_expr(arg)).collect();
+
+        // Generate a call to the builtin function
+        let result = self.builder.fresh_value_id();
+        self.emit(IRInstruction::CallBuiltin {
+            result,
+            metadata: InstructionMetadata {
+                memory_slot: None,
+                allocation_site: None,
+            },
+            builtin_name: func_name.to_string(),
+            args: arg_values,
+            span: span.clone(),
+            file: file.to_string(),
+        });
+
+        IRValue::SSA(result)
     }
 }
