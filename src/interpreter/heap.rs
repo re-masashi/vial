@@ -32,18 +32,59 @@ pub struct Heap {
 }
 
 impl Heap {
+    /// Creates a new, empty heap.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crate::interpreter::{heap::Heap, heap::HeapObject};
+    ///
+    /// let mut heap = Heap::new();
+    /// let ptr = heap.allocate(HeapObject::Array { elements: vec![] });
+    /// // first allocation is stored at index 0
+    /// assert_eq!(ptr.id, 0);
+    /// ```
     pub fn new() -> Self {
         Self {
             objects: Vec::new(),
         }
     }
 
+    /// Allocates a heap object and returns a pointer to it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut heap = Heap::new();
+    /// let ptr = heap.allocate(HeapObject::Array { elements: vec![] });
+    /// assert_eq!(ptr.id, 0);
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// A `HeapPtr` that references the newly stored object.
     pub fn allocate(&mut self, object: HeapObject) -> HeapPtr {
         let id = self.objects.len();
         self.objects.push(Some(object));
         HeapPtr { id }
     }
 
+    /// Retrieves an immutable reference to the heap object identified by `ptr`.
+    ///
+    /// Returns `&HeapObject` when `ptr` refers to an allocated object, or
+    /// `InterpreterError::InvalidHeapAccess` if the pointer is out of bounds or points to a freed slot.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut heap = Heap::new();
+    /// let ptr = heap.allocate(HeapObject::Array { elements: vec![] });
+    /// let obj = heap.get(ptr).unwrap();
+    /// match obj {
+    ///     HeapObject::Array { elements } => assert!(elements.is_empty()),
+    ///     _ => panic!("expected array"),
+    /// }
+    /// ```
     pub fn get(&self, ptr: HeapPtr) -> Result<&HeapObject, super::error::InterpreterError> {
         self.objects
             .get(ptr.id)
@@ -51,6 +92,30 @@ impl Heap {
             .ok_or(super::error::InterpreterError::InvalidHeapAccess)
     }
 
+    /// Returns a mutable reference to the heap object pointed to by `ptr`.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(&mut HeapObject)` with a mutable reference to the object when `ptr` refers to a valid, live object; `Err(InterpreterError::InvalidHeapAccess)` if `ptr` is out of bounds or the object has been deallocated.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut heap = Heap::new();
+    /// let ptr = heap.allocate(HeapObject::Array { elements: vec![Value::Int(1)] });
+    ///
+    /// {
+    ///     let obj = heap.get_mut(ptr).unwrap();
+    ///     if let HeapObject::Array { elements } = obj {
+    ///         elements.push(Value::Int(2));
+    ///     }
+    /// }
+    ///
+    /// let obj = heap.get(ptr).unwrap();
+    /// if let HeapObject::Array { elements } = obj {
+    ///     assert_eq!(elements.len(), 2);
+    /// }
+    /// ```
     pub fn get_mut(
         &mut self,
         ptr: HeapPtr,
@@ -61,6 +126,21 @@ impl Heap {
             .ok_or(super::error::InterpreterError::InvalidHeapAccess)
     }
 
+    /// Removes and returns the heap object at the specified pointer.
+    ///
+    /// Returns the removed `HeapObject` on success. Returns `InterpreterError::InvalidHeapAccess` if the pointer's index is out of bounds or the entry has already been deallocated.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut heap = Heap::new();
+    /// let ptr = heap.allocate(HeapObject::Array { elements: vec![] });
+    /// let obj = heap.deallocate(ptr).unwrap();
+    /// match obj {
+    ///     HeapObject::Array { elements } => assert!(elements.is_empty()),
+    ///     _ => panic!("expected array"),
+    /// }
+    /// ```
     pub fn deallocate(
         &mut self,
         ptr: HeapPtr,

@@ -17,10 +17,32 @@ pub struct CallStack {
 }
 
 impl CallStack {
+    /// Creates an empty call stack.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let stack = CallStack::new();
+    /// assert!(stack.is_empty());
+    /// assert_eq!(stack.len(), 0);
+    /// ```
     pub fn new() -> Self {
         Self { frames: Vec::new() }
     }
 
+    /// Pushes a new call frame for `function_id` starting at `current_block` and returns a mutable reference to it.
+    ///
+    /// The new frame's `last_block` is initialized to `None` and `locals` to an empty map.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut stack = CallStack::new();
+    /// let frame = stack.push(FunctionId(1), BasicBlockId(0));
+    /// assert_eq!(stack.len(), 1);
+    /// assert_eq!(frame.function_id, FunctionId(1));
+    /// assert_eq!(frame.current_block, BasicBlockId(0));
+    /// ```
     pub fn push(&mut self, function_id: FunctionId, current_block: BasicBlockId) -> &mut CallFrame {
         self.frames.push(CallFrame {
             function_id,
@@ -31,22 +53,85 @@ impl CallStack {
         self.frames.last_mut().unwrap()
     }
 
+    /// Removes and returns the top call frame from the stack.
+    ///
+    /// # Returns
+    ///
+    /// `Some(CallFrame)` containing the popped frame, or `None` if the stack is empty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut stack = CallStack::new();
+    /// stack.push(FunctionId(1), BasicBlockId(0));
+    /// let frame = stack.pop();
+    /// assert!(frame.is_some());
+    /// assert!(stack.is_empty());
+    /// ```
     pub fn pop(&mut self) -> Option<CallFrame> {
         self.frames.pop()
     }
 
+    /// Returns a mutable reference to the top call frame, if one exists.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut stack = CallStack::new();
+    /// stack.push(FunctionId(1), BasicBlockId(0));
+    /// if let Some(frame) = stack.current() {
+    ///     frame.locals.insert(ValueId(1), Value::Int(42));
+    /// }
+    /// assert_eq!(stack.current_function_id(), Some(FunctionId(1)));
+    /// ```
     pub fn current(&mut self) -> Option<&mut CallFrame> {
         self.frames.last_mut()
     }
 
+    /// Gets the FunctionId of the top call frame, if present.
+    ///
+    /// # Returns
+    ///
+    /// `Some(FunctionId)` containing the top frame's function id, or `None` if the stack is empty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut stack = CallStack::new();
+    /// assert_eq!(stack.current_function_id(), None);
+    /// stack.push(FunctionId(1), BasicBlockId(0));
+    /// assert_eq!(stack.current_function_id(), Some(FunctionId(1)));
+    /// ```
     pub fn current_function_id(&self) -> Option<FunctionId> {
         self.frames.last().map(|frame| frame.function_id)
     }
 
+    /// Report the number of frames on the call stack.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut stack = CallStack::new();
+    /// assert_eq!(stack.len(), 0);
+    /// stack.push(FunctionId(1), BasicBlockId(0));
+    /// assert_eq!(stack.len(), 1);
+    /// ```
     pub fn len(&self) -> usize {
         self.frames.len()
     }
 
+    /// Checks whether the call stack contains no frames.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let stack = CallStack::new();
+    /// assert!(stack.is_empty());
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// `true` if the stack has no frames, `false` otherwise.
     pub fn is_empty(&self) -> bool {
         self.frames.is_empty()
     }

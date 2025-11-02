@@ -3,6 +3,24 @@ use std::io::{self};
 use super::error::InterpreterError;
 use super::value::Value;
 
+/// Executes a runtime builtin by name using the given arguments.
+///
+/// This dispatches the builtin identified by `name` and returns the result of that operation
+/// or an `InterpreterError` describing why the builtin could not be executed.
+///
+/// # Returns
+/// `Ok(Value)` containing the builtin's result (commonly `Value::Null` for side-effectful builtins),
+/// or `Err(InterpreterError)` if the builtin name is unknown, argument counts/types are invalid,
+/// input/output fails, or a conversion cannot be performed.
+///
+/// # Examples
+///
+/// ```
+/// # use crate::interpreter::{builtins::execute_builtin, value::Value, error::InterpreterError};
+/// // Convert integer to string
+/// let res = execute_builtin("int_to_string", vec![Value::Int(42)]).unwrap();
+/// assert_eq!(res, Value::String("42".to_string()));
+/// ```
 pub fn execute_builtin(name: &str, args: Vec<Value>) -> Result<Value, InterpreterError> {
     match name {
         "print" => {
