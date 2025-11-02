@@ -183,8 +183,7 @@ impl UntypedValidator {
                         // Don't desugar them here in untyped validation - keep as macro calls for type checker
                         let desugared_args: Vec<_> = args
                             .iter()
-                            .cloned()
-                            .map(|arg| self.desugar_expr_in_macro(&arg))
+                            .map(|arg| self.desugar_expr_in_macro(arg))
                             .collect();
                         ExprKind::MacroCall(name.to_string(), desugared_args, delimiter.clone())
                     }
@@ -230,8 +229,7 @@ impl UntypedValidator {
                         // For non-builtin macros, just desugar the arguments (but built-in macros shouldn't reach here in the normal flow since they're handled elsewhere)
                         let new_args = args
                             .iter()
-                            .cloned()
-                            .map(|arg| self.desugar_expr_in_macro(&arg))
+                            .map(|arg| self.desugar_expr_in_macro(arg))
                             .collect();
                         ExprKind::MacroCall(name.to_string(), new_args, delimiter.clone())
                     }
