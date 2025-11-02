@@ -10,6 +10,7 @@ use vial::ast::Interner;
 use vial::ast::*;
 use vial::desugar::lambda::LambdaDesugarer;
 use vial::desugar::methods::MethodCallDesugarer;
+use vial::interpreter::Interpreter;
 use vial::lexer::Token;
 use vial::parser;
 use vial::typechecker::TypeChecker;
@@ -151,9 +152,44 @@ fn main() {
         println!("{:#?}", ir_module);
     }
 
-    println!("\nNext steps:");
-    println!("  - TODO: Optimization passes");
-    println!("  - Run with --execute or -e to execute the program");
+    // Add execution option
+    if args.contains(&"--execute".to_string()) || args.contains(&"-e".to_string()) {
+        println!("[Interpreter] Executing IR...");
+
+        let mut main_func_id = None;
+        for (func_id, &idx) in &ir_module.function_map {
+            if let Some(func) = ir_module.functions.get(idx)
+                && func.name == "main"
+            {
+                main_func_id = Some(*func_id);
+                break;
+            }
+        }
+
+        // If no main function was found, use the first function
+        if main_func_id.is_none() && !ir_module.functions.is_empty() {
+            panic!("NO MAIN");
+        }
+
+        if let Some(func_id) = main_func_id {
+            let mut interpreter = Interpreter::new(ir_module);
+            match interpreter.run(func_id) {
+                Ok(result) => {
+                    println!("[Execution Result] {:?}", result);
+                }
+                Err(e) => {
+                    eprintln!("[Execution Error] {:?}", e);
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            eprintln!("[Execution Error] No functions found to execute");
+            std::process::exit(1);
+        }
+    } else {
+        println!("\nNext steps:");
+        println!("  - Run with --execute or -e to execute the program");
+    }
 }
 
 fn report_parse_errors(

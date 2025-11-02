@@ -1039,14 +1039,14 @@ impl<'a> FunctionBuilder<'a> {
         }
 
         // Lower the function body
-        let _result = self.lower_expr(body);
+        let result_val = self.lower_expr(body);
 
         // If we haven't already terminated the current block, add a return
         let current_block = self.blocks.get_mut(&self.current_block).unwrap();
         if current_block.terminator.is_none() {
-            // Add a return instruction
+            // Add a return instruction with the actual return value
             current_block.terminator = Some(IRTerminator::Return {
-                value: None,
+                value: Some(result_val),
                 span: body.span.clone(),
                 file: body.file.clone(),
             });
@@ -1078,17 +1078,23 @@ impl<'a> FunctionBuilder<'a> {
             TypedExprKind::Float(f) => IRValue::Float(*f),
             TypedExprKind::Bool(b) => IRValue::Bool(*b),
             TypedExprKind::String(s) => IRValue::String(s.clone()),
-            TypedExprKind::Variable { binding_id, .. } => {
+            TypedExprKind::Variable {
+                name, binding_id, ..
+            } => {
                 // Check if this is a local variable binding
                 if let Some(value_id) = self.bindings.get(&binding_id.0) {
                     IRValue::SSA(*value_id)
                 } else {
-                    // This is likely a function reference that should not be treated as a local variable
-                    // This can happen during monomorphization when function references are created
-                    // with binding IDs that don't correspond to local variable bindings
-                    // For now, create a placeholder and continue compilation
-                    let placeholder_value_id = self.builder.fresh_value_id();
-                    IRValue::SSA(placeholder_value_id)
+                    // Check if this variable name refers to a function
+                    let func_name = self.builder.interner.resolve(*name).to_string();
+                    if let Some(&func_id) = self.builder.function_names.get(&func_name) {
+                        // This is a function reference
+                        IRValue::FunctionRef(func_id)
+                    } else {
+                        // This is likely a local variable that wasn't found (error case)
+                        let placeholder_value_id = self.builder.fresh_value_id();
+                        IRValue::SSA(placeholder_value_id)
+                    }
                 }
             }
             TypedExprKind::BinOp { left, op, right } => {
@@ -1355,7 +1361,7 @@ impl<'a> FunctionBuilder<'a> {
                     }
                     "println!" | "println" => {
                         // Convert println! macro to print function call (with potential newline)
-                        self.lower_builtin_macro_call("print", args, &expr.span, &expr.file)
+                        self.lower_builtin_macro_call("println", args, &expr.span, &expr.file)
                     }
                     "input!" | "input" => {
                         // Convert input! macro to input function call
