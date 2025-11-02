@@ -65,20 +65,16 @@ impl Monomorphizer {
         for node in program {
             match node.node {
                 TypedASTNodeKind::Function(func) => {
-                    // Check if function is generic (has type parameters or type variables)
-                    let is_generic = !func.type_params.is_empty() || {
-                        let type_vars = self.collect_type_vars_from_func(&func);
-                        !type_vars.is_empty()
-                    };
+                    // Check if function is generic (has explicit type parameters)
+                    // Don't consider functions with only inferred type variables as generic
+                    // because those should be processed normally (e.g., main function)
+                    let has_explicit_type_params = !func.type_params.is_empty();
 
-                    if is_generic {
-                        // This is a generic function - don't include it in output directly,
-                        // it will be specialized when called with concrete types
-                        // But we still need to store it for specialization later
+                    if has_explicit_type_params {
+                        // This is a truly generic function - don't include it in output directly
                         continue; // Don't add to result yet
                     } else {
                         // Non-generic function - keep it and monomorphize body
-                        // Apply substitution to resolve any type variables
                         let mono_func = self.monomorphize_function_body(*func);
                         result.push(TypedASTNode {
                             span: node.span,
@@ -220,7 +216,49 @@ impl Monomorphizer {
 
     fn monomorphize_function_body(&mut self, mut func: TypedFunction) -> TypedFunction {
         if let Some(body) = func.body {
-            func.body = Some(self.monomorphize_expr(body));
+            let mono_body = self.monomorphize_expr(body);
+            // If the function's return type is a variable and the body has a concrete type,
+            // update the return type to match the body's type
+            if let TypeKind::Variable { .. } = func.return_type.type_
+                && !matches!(mono_body.type_.type_, TypeKind::Variable { .. }) {
+                    func.return_type = mono_body.type_.clone();
+                }
+            func.body = Some(mono_body);
+        }
+
+        // Also update function type to remove Forall and update return type in function type
+        if let TypeKind::Forall { body, .. } = &func.function_type.type_ {
+            let mut updated_func_type = body.clone();
+
+            // If the return type in function type is a variable and we have resolved it,
+            // update the function type as well
+            if let TypeKind::Function {
+                params,
+                return_type: func_return_type,
+                effects,
+            } = &updated_func_type.type_
+            {
+                let final_return_type =
+                    if matches!(func_return_type.type_, TypeKind::Variable { .. })
+                        && !matches!(func.return_type.type_, TypeKind::Variable { .. })
+                    {
+                        func.return_type.clone()
+                    } else {
+                        func_return_type.clone()
+                    };
+
+                updated_func_type = Rc::new(Type {
+                    span: updated_func_type.span.clone(),
+                    file: updated_func_type.file.clone(),
+                    type_: TypeKind::Function {
+                        params: params.clone(),
+                        return_type: final_return_type,
+                        effects: effects.clone(),
+                    },
+                });
+            }
+
+            func.function_type = updated_func_type;
         }
         func
     }
@@ -969,6 +1007,51 @@ impl Monomorphizer {
                     .map(|arg| self.monomorphize_expr(arg))
                     .collect();
 
+                // For builtin macros, resolve the return type to concrete types
+                let macro_name_str = self.interner.resolve(name);
+                let resolved_type = match macro_name_str {
+                    "println" | "print" | "println!" | "print!" => {
+                        // These macros return unit
+                        Rc::new(Type {
+                            span: expr.type_.span.clone(),
+                            file: expr.type_.file.clone(),
+                            type_: TypeKind::Constructor {
+                                name: self.interner.intern("unit").0, // Symbol ID for "unit"
+                                args: vec![],
+                                kind: Kind::Star,
+                            },
+                        })
+                    }
+                    "input" | "input!" => {
+                        // input! returns string
+                        Rc::new(Type {
+                            span: expr.type_.span.clone(),
+                            file: expr.type_.file.clone(),
+                            type_: TypeKind::Constructor {
+                                name: self.interner.intern("string").0, // Symbol ID for "string"
+                                args: vec![],
+                                kind: Kind::Star,
+                            },
+                        })
+                    }
+                    "typeof" | "typeof!" => {
+                        // typeof! returns string
+                        Rc::new(Type {
+                            span: expr.type_.span.clone(),
+                            file: expr.type_.file.clone(),
+                            type_: TypeKind::Constructor {
+                                name: self.interner.intern("string").0, // Symbol ID for "string"
+                                args: vec![],
+                                kind: Kind::Star,
+                            },
+                        })
+                    }
+                    _ => {
+                        // For other macros, keep the original type
+                        expr.type_.clone()
+                    }
+                };
+
                 (
                     TypedExprKind::MacroCall {
                         name,
@@ -976,7 +1059,7 @@ impl Monomorphizer {
                         args: mono_args,
                         delimiter,
                     },
-                    expr.type_.clone(),
+                    resolved_type,
                 )
             }
 
