@@ -856,16 +856,4 @@ mod tests {
             _ => panic!("Expected TypeError"),
         }
     }
-
-    #[test]
-    fn test_factorial_example() {
-        // This test would typically require a pre-built IR module for factorial
-        // For now, we'll just test that the structure is correct
-        let module = IRModule::new(crate::ir::TargetInfo::vm_target());
-        let mut interpreter = Interpreter::new(module);
-
-        // We can't run the actual factorial without building the IR first
-        // But we can test the basic framework
-        assert_eq!(interpreter.call_stack.len(), 0);
-    }
 }
