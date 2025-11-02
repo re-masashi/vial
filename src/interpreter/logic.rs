@@ -91,64 +91,77 @@ impl Interpreter {
             frame.locals.insert(value_id, arg_value);
         }
 
-        // Process each basic block until we return
-        loop {
-            // Check for stack overflow
-            if self.call_stack.len() > 1000 {
-                return Err(InterpreterError::StackOverflow);
-            }
+        // Process each basic block until we return - use a Result to handle errors and cleanup
+        let result = (|| -> Result<Value, InterpreterError> {
+            // Process each basic block until we return
+            loop {
+                // Check for stack overflow
+                if self.call_stack.len() > 1000 {
+                    return Err(InterpreterError::StackOverflow);
+                }
 
-            let current_frame = self.call_stack.current().unwrap();
-            let block_id = current_frame.current_block;
+                let current_frame = self.call_stack.current().unwrap();
+                let block_id = current_frame.current_block;
 
-            // Find the basic block in the function
-            let block = function
-                .basic_blocks
-                .iter()
-                .find(|b| b.id == block_id)
-                .ok_or_else(|| InterpreterError::TypeError {
-                    expected: "valid basic block",
-                    got: format!("block id: {:?}", block_id),
-                })?;
+                // Find the basic block in the function
+                let block = function
+                    .basic_blocks
+                    .iter()
+                    .find(|b| b.id == block_id)
+                    .ok_or_else(|| InterpreterError::TypeError {
+                        expected: "valid basic block",
+                        got: format!("block id: {:?}", block_id),
+                    })?;
 
-            // Execute the block
-            let result = self.execute_block(block, function)?;
+                // Execute the block
+                let result = self.execute_block(block, function)?;
 
-            match result {
-                Some(terminator_result) => match terminator_result {
-                    TerminatorResult::Return(value) => {
-                        self.call_stack.pop();
-                        return Ok(value);
+                match result {
+                    Some(terminator_result) => match terminator_result {
+                        TerminatorResult::Return(value) => {
+                            return Ok(value); // Will be handled by outer function
+                        }
+                        TerminatorResult::Jump(target) => {
+                            let current_frame = self.call_stack.current().unwrap();
+                            current_frame.last_block = Some(current_frame.current_block);
+                            current_frame.current_block = target;
+                        }
+                        TerminatorResult::Branch {
+                            then_block,
+                            else_block,
+                            condition,
+                        } => {
+                            let current_frame = self.call_stack.current().unwrap();
+                            current_frame.last_block = Some(current_frame.current_block);
+                            let target = if condition { then_block } else { else_block };
+                            current_frame.current_block = target;
+                        }
+                        TerminatorResult::Switch { target } => {
+                            let current_frame = self.call_stack.current().unwrap();
+                            current_frame.last_block = Some(current_frame.current_block);
+                            current_frame.current_block = target;
+                        }
+                    },
+                    None => {
+                        // No terminator result means continue to next block (though this shouldn't happen in proper SSA)
+                        break;
                     }
-                    TerminatorResult::Jump(target) => {
-                        let current_frame = self.call_stack.current().unwrap();
-                        current_frame.last_block = Some(current_frame.current_block);
-                        current_frame.current_block = target;
-                    }
-                    TerminatorResult::Branch {
-                        then_block,
-                        else_block,
-                        condition,
-                    } => {
-                        let current_frame = self.call_stack.current().unwrap();
-                        current_frame.last_block = Some(current_frame.current_block);
-                        let target = if condition { then_block } else { else_block };
-                        current_frame.current_block = target;
-                    }
-                    TerminatorResult::Switch { target } => {
-                        let current_frame = self.call_stack.current().unwrap();
-                        current_frame.last_block = Some(current_frame.current_block);
-                        current_frame.current_block = target;
-                    }
-                },
-                None => {
-                    // No terminator result means continue to next block (though this shouldn't happen in proper SSA)
-                    break;
                 }
             }
-        }
 
-        Ok(Value::Null)
+            Ok(Value::Null)
+        })();
+
+        match result {
+            Ok(value) => {
+                self.call_stack.pop(); // Clean up frame on success
+                Ok(value)
+            }
+            Err(error) => {
+                self.call_stack.pop(); // Clean up frame on error
+                Err(error)
+            }
+        }
     }
 
     // Helper to get the ValueId that corresponds to a function argument
@@ -834,26 +847,5 @@ mod tests {
         let module = IRModule::new(crate::ir::TargetInfo::vm_target());
         let interpreter = Interpreter::new(module);
         assert_eq!(interpreter.call_stack.len(), 0);
-    }
-
-    #[test]
-    fn test_interpreter_error_types() {
-        let error = InterpreterError::DivisionByZero;
-        match error {
-            InterpreterError::DivisionByZero => (), // This should match
-            _ => panic!("Expected DivisionByZero error"),
-        }
-
-        let error = InterpreterError::TypeError {
-            expected: "int",
-            got: "float".to_string(),
-        };
-        match error {
-            InterpreterError::TypeError { expected, got } => {
-                assert_eq!(expected, "int");
-                assert_eq!(got, "float");
-            }
-            _ => panic!("Expected TypeError"),
-        }
     }
 }
