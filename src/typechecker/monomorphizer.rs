@@ -220,9 +220,10 @@ impl Monomorphizer {
             // If the function's return type is a variable and the body has a concrete type,
             // update the return type to match the body's type
             if let TypeKind::Variable { .. } = func.return_type.type_
-                && !matches!(mono_body.type_.type_, TypeKind::Variable { .. }) {
-                    func.return_type = mono_body.type_.clone();
-                }
+                && !matches!(mono_body.type_.type_, TypeKind::Variable { .. })
+            {
+                func.return_type = mono_body.type_.clone();
+            }
             func.body = Some(mono_body);
         }
 

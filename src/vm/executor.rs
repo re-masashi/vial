@@ -789,15 +789,14 @@ mod tests {
         };
 
         // Set register 2 with bit pattern for float 3.14
-        vm.registers[2] = (3.14f64).to_bits() as i64;
+        vm.registers[2] = (std::f64::consts::PI).to_bits() as i64;
 
         // Execute the builtin float_to_string call
         let result = vm.execute_instruction(&instruction);
 
         assert!(result.is_ok());
         // The return value should be in R0 (register 0) - length of string representation
-        // "3.14" has length 4, but our implementation just returns the length
-        assert_eq!(vm.registers[0], 4); // This will be the length of string "3.14"
+        assert_eq!(vm.registers[0], 17); // This will be the length of string "3.1415..."
     }
 
     #[test]
