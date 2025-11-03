@@ -4568,7 +4568,7 @@ fn test_builtin_macro_wrong_arity() {
 fn test_builtin_input_macro_wrong_args() {
     let mut tc = setup();
 
-    // Test input! with arguments (should be none)
+    // Test input! with arguments
     let input_macro = Expr {
         span: dummy_span(),
         file: dummy_file(),

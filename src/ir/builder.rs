@@ -1378,15 +1378,15 @@ impl<'a> FunctionBuilder<'a> {
 
                 // Handle builtin macros by converting them to function calls
                 match macro_name.as_str() {
-                    "print!" | "print" => {
+                    "print" => {
                         // Convert print! macro to print function call
                         self.lower_builtin_macro_call("print", args, &expr.span, &expr.file)
                     }
-                    "println!" | "println" => {
+                    "println" => {
                         // Convert println! macro to print function call (with potential newline)
                         self.lower_builtin_macro_call("println", args, &expr.span, &expr.file)
                     }
-                    "input!" | "input" => {
+                    "input" => {
                         // Convert input! macro to input function call
                         self.lower_builtin_macro_call("input", args, &expr.span, &expr.file)
                     }
