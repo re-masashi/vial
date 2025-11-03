@@ -58,6 +58,25 @@ mod tests {
         }
     }
 
+    /// Verifies that the `Debug` representation of select `InterpreterError` variants contains their
+    /// variant names and relevant field values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let error = InterpreterError::DivisionByZero;
+    /// let debug_str = format!("{:?}", error);
+    /// assert!(debug_str.contains("DivisionByZero"));
+    ///
+    /// let error = InterpreterError::TypeError {
+    ///     expected: "int",
+    ///     got: "float".to_string(),
+    /// };
+    /// let debug_str = format!("{:?}", error);
+    /// assert!(debug_str.contains("TypeError"));
+    /// assert!(debug_str.contains("int"));
+    /// assert!(debug_str.contains("float"));
+    /// ```
     #[test]
     fn test_error_display() {
         let error = InterpreterError::DivisionByZero;
@@ -74,6 +93,27 @@ mod tests {
         assert!(debug_str.contains("float"));
     }
 
+    /// Verifies that every `InterpreterError` variant can be constructed.
+    ///
+    /// Constructs one instance of each `InterpreterError` variant and asserts that
+    /// the collection contains nine entries, covering all defined variants.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let errors = vec![
+    ///     InterpreterError::DivisionByZero,
+    ///     InterpreterError::InvalidHeapAccess,
+    ///     InterpreterError::StackOverflow,
+    ///     InterpreterError::NoMatchingCase,
+    ///     InterpreterError::UnknownBuiltin("test".to_string()),
+    ///     InterpreterError::TypeError { expected: "test", got: "test".to_string() },
+    ///     InterpreterError::UndefinedValue(ValueId(1)),
+    ///     InterpreterError::UndefinedFunction(FunctionId(1)),
+    ///     InterpreterError::IOError(std::io::Error::new(std::io::ErrorKind::Other, "test")),
+    /// ];
+    /// assert_eq!(errors.len(), 9);
+    /// ```
     #[test]
     fn test_error_variants_coverage() {
         let errors = vec![

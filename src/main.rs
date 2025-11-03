@@ -17,6 +17,23 @@ use vial::typechecker::TypeChecker;
 use vial::typechecker::monomorphizer::Monomorphizer;
 use vial::validation::{TypedValidator, UntypedValidator};
 
+/// Entry point for the compiler CLI that runs the full compile pipeline (lexing, parsing,
+/// untyped validation, method-call desugaring, type checking, lambda desugaring,
+/// monomorphization, typed validation, and IR generation) and optionally executes the
+/// resulting IR with the interpreter or dumps the IR.
+///
+/// When the `--ir-dump` / `-i` flag is present the generated IR module is printed.
+/// When the `--execute` / `-e` flag is present the runtime will attempt to locate a
+/// `main` function in the IR and execute it via the `Interpreter`.
+///
+/// # Examples
+///
+/// ```no_run
+/// // From the workspace root:
+/// // cargo run -- path/to/file.ni        # compile and show guidance
+/// // cargo run -- -i path/to/file.ni     # compile and dump the IR
+/// // cargo run -- -e path/to/file.ni     # compile and execute the program (requires `main`)
+/// ```
 fn main() {
     let args: Vec<String> = env::args().collect();
 
@@ -192,6 +209,23 @@ fn main() {
     }
 }
 
+/// Emits human-readable parse diagnostics for a list of parser errors.
+///
+/// The function converts parser token-span indices to byte ranges using `token_spans`,
+/// formats a clear error message for each `error`, and prints a labeled, colored
+/// diagnostic pointing into `source` for `filename`.
+///
+/// `errors` — parser errors produced by the chumsky parser.
+/// `token_spans` — a slice mapping token indices to source byte ranges (each range is the token's start..end).
+/// `filename` — the name used when reporting the source (shown in diagnostics).
+/// `source` — the full source text corresponding to `filename`.
+///
+/// # Examples
+///
+/// ```
+/// // Call with no errors to verify invocation doesn't panic.
+/// report_parse_errors(&[], &[], "example.ni", "");
+/// ```
 fn report_parse_errors(
     errors: &[chumsky::error::Rich<'_, Token>],
     token_spans: &[std::ops::Range<usize>],

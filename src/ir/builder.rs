@@ -1031,6 +1031,19 @@ impl<'a> FunctionBuilder<'a> {
         }
     }
 
+    /// Lowers a typed function body into the function's IR, finalizing the entry blocks and return terminator.
+    ///
+    /// This assigns SSA values for the function parameters, lowers the function's body expression to an IR value,
+    /// ensures the current block has a `Return` terminator carrying that value if no terminator exists, and then
+    /// runs escape analysis for the function.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Given a prepared FunctionBuilder `fb`, a `TypedFunction` `func` and its body expression `body`,
+    /// // the following lowers the body into `fb`'s IR state:
+    /// // fb.lower_function_body(&func, &body);
+    /// ```
     fn lower_function_body(&mut self, function: &TypedFunction, body: &TypedExpr) {
         // Process parameters
         for param in &function.args {
@@ -1072,6 +1085,21 @@ impl<'a> FunctionBuilder<'a> {
         }
     }
 
+    /// Lowers a typed expression into an intermediate representation value.
+    ///
+    /// This produces an IRValue that represents the result of evaluating the given
+    /// TypedExpr within the current function-building context, emitting IR
+    /// instructions and terminators as necessary and updating the builder's SSA
+    /// bindings and basic blocks.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Given a FunctionBuilder `fb` and a `TypedExpr` representing `42`,
+    /// // the lowered value for an integer literal is `IRValue::Int(42)`.
+    /// let val = fb.lower_expr(&typed_expr_int_42);
+    /// assert_eq!(val, IRValue::Int(42));
+    /// ```
     fn lower_expr(&mut self, expr: &TypedExpr) -> IRValue {
         match &expr.expr {
             TypedExprKind::Int(n) => IRValue::Int(*n),

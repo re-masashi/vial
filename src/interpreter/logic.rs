@@ -33,6 +33,25 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
+    /// Creates a new Interpreter for the given IR module.
+    ///
+    /// The interpreter is initialized with an empty call stack, a fresh heap, and an empty globals map.
+    ///
+    /// # Parameters
+    ///
+    /// * `module` - The IRModule to be executed by the interpreter; ownership is moved into the returned interpreter.
+    ///
+    /// # Returns
+    ///
+    /// An Interpreter instance ready to run the provided module.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Given an existing `module: IRModule`
+    /// // let module = ...;
+    /// let mut interp = Interpreter::new(module);
+    /// ```
     pub fn new(module: IRModule) -> Self {
         Self {
             module,
@@ -43,6 +62,25 @@ impl Interpreter {
     }
 
     // Main entry point
+    /// Execute the module starting at the specified function and return its resulting value.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(Value)` with the function's return value, or `Err(InterpreterError)` if execution fails (for example: undefined function, type errors, division by zero, or other runtime/interpreter errors).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Construct `ir_module` and `entry_id` appropriately for your IR.
+    /// // let ir_module = ...;
+    /// // let entry_id = ...;
+    /// let mut interp = Interpreter::new(ir_module);
+    /// let result = interp.run(entry_id);
+    /// match result {
+    ///     Ok(val) => { /* use returned `val` */ }
+    ///     Err(err) => panic!("execution failed: {:?}", err),
+    /// }
+    /// ```
     pub fn run(&mut self, entry_function: FunctionId) -> Result<Value, InterpreterError> {
         // Find the entry function in the module
         let func_idx = self
@@ -57,11 +95,47 @@ impl Interpreter {
     }
 
     // Execute a single function
+    /// Executes the given IR function with no arguments and returns its result.
+    ///
+    /// # Returns
+    ///
+    /// `Value` produced by the function, or an `InterpreterError` if execution fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # // The following is an illustrative example; adjust construction to your crate's APIs.
+    /// # use crate::interpreter::logic::Interpreter;
+    /// # use crate::ir::IRFunction;
+    /// # let mut interp = Interpreter::new(/* IRModule instance */);
+    /// # let func: IRFunction = /* build or obtain an IRFunction */ unimplemented!();
+    /// let res = interp._execute_function(&func);
+    /// match res {
+    ///     Ok(val) => println!("function returned: {:?}", val),
+    ///     Err(err) => eprintln!("execution failed: {:?}", err),
+    /// }
+    /// ```
     fn _execute_function(&mut self, function: &IRFunction) -> Result<Value, InterpreterError> {
         self.execute_function_with_args(function, vec![])
     }
 
     // Execute a single function with arguments
+    /// Executes the given IR function with the provided argument values and drives control flow until the function returns.
+    ///
+    /// Binds passed `args` to the function's parameters, pushes a new call frame, then repeatedly executes basic blocks and their terminators, updating the current frame's block pointer until a `Return` terminator produces a value. If execution completes without an explicit return, `Value::Null` is returned.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(Value)` with the function's return value, or `Ok(Value::Null)` if the function finishes without an explicit return. Returns `Err(InterpreterError)` for runtime or validation failures (for example: missing entry block, invalid basic block id, stack overflow, division-by-zero, or type errors).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Pseudocode example (constructing a real IRFunction is omitted for brevity):
+    /// // let mut interp = Interpreter::new(module);
+    /// // let result = interp.execute_function_with_args(&my_function, vec![Value::Int(1)]);
+    /// // assert!(result.is_ok());
+    /// ```
     fn execute_function_with_args(
         &mut self,
         function: &IRFunction,
@@ -165,6 +239,29 @@ impl Interpreter {
     }
 
     // Helper to get the ValueId that corresponds to a function argument
+    /// Map an IR function argument to the interpreter's ValueId representation.
+    ///
+    /// The current interpreter uses the argument's memory slot ID as a proxy for its SSA ValueId.
+    /// This returns the mapped `ValueId` when the argument can be represented, or `None` if no mapping
+    /// is available.
+    ///
+    /// # Parameters
+    ///
+    /// - `arg`: the IR-level function argument to map; its `memory_slot` is used as the source of the ID.
+    ///
+    /// # Returns
+    ///
+    /// `Some(ValueId)` containing the mapped value identifier when mapping is possible, `None` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Assuming an IRFunctionArg with memory_slot (42,)
+    /// let arg = crate::ir::IRFunctionArg { memory_slot: (42,), ..Default::default() };
+    /// let mapper = /* an Interpreter instance or a helper with the method available */;
+    /// let vid = mapper.map_arg_to_value_id(&arg);
+    /// assert_eq!(vid, Some(ValueId(42)));
+    /// ```
     fn map_arg_to_value_id(&self, arg: &crate::ir::IRFunctionArg) -> Option<ValueId> {
         // In SSA form, function arguments should have corresponding ValueIds
         // For now, we'll use the memory slot ID as a proxy for the argument's ValueId
@@ -174,6 +271,32 @@ impl Interpreter {
     }
 
     // Execute a basic block
+    /// Executes a basic block's PHI nodes, instructions, and terminator within the current frame.
+    ///
+    /// The function evaluates all PHI nodes first, then all regular instructions, and finally
+    /// executes the block's terminator (if present). It returns the resulting `TerminatorResult`
+    /// when a terminator was executed, or `None` when the block has no terminator.
+    ///
+    /// # Parameters
+    ///
+    /// - `block`: the basic block to execute.
+    /// - `_function`: the parent function containing the block (currently unused but provided for context).
+    ///
+    /// # Returns
+    ///
+    /// `Ok(Some(TerminatorResult))` if the block had a terminator and it was executed, `Ok(None)` if the
+    /// block contained no terminator, or `Err(InterpreterError)` on execution failure.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// // construct module, function, and basic block according to crate::ir types...
+    /// let mut interp = Interpreter::new(module);
+    /// let result = interp.execute_block(&block, &function).unwrap();
+    /// if let Some(term) = result {
+    ///     // handle TerminatorResult
+    /// }
+    /// ```
     fn execute_block(
         &mut self,
         block: &crate::ir::BasicBlock,
@@ -200,6 +323,35 @@ impl Interpreter {
     }
 
     // Execute a single instruction
+    /// Executes a single IR instruction, mutating the interpreter's state (call stack, current frame locals, heap, and globals) as required.
+    ///
+    /// Supported instruction behaviors include arithmetic and logical operations, unary ops, value binding (`let`/`copy`/`select`/`phi`), compound value construction (arrays, tuples, structs, enums), memory operations (`load`, `store`, `allocate`, `field access`, `index`), function and builtin calls, and other SSA-style instructions. The method updates the current call frame's locals, performs heap allocations, and may push/pop frames indirectly by invoking other functions through `Call`.
+    ///
+    /// On failure, it returns an `InterpreterError` describing issues such as type mismatches, undefined functions, or division-by-zero.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use crate::ir::{IRInstruction, IRValue, ValueId};
+    /// # use crate::interpreter::{Interpreter, IRModule};
+    /// // Construct a minimal module and interpreter (details omitted)
+    /// let module = IRModule::default();
+    /// let mut interp = Interpreter::new(module);
+    ///
+    /// // Example: bind an integer literal to a SSA value using a Let instruction.
+    /// let result_id = ValueId(0);
+    /// let instr = IRInstruction::Let {
+    ///     result: result_id,
+    ///     value: IRValue::Int(42),
+    ///     debug_name: None,
+    /// };
+    ///
+    /// // Execute the instruction and assert success
+    /// interp.execute_instruction(&instr).expect("instruction failed");
+    ///
+    /// // After execution, the current frame's locals should contain the bound value.
+    /// // (Accessing the frame is shown illustratively; real tests may use public accessors.)
+    /// ```
     fn execute_instruction(&mut self, inst: &IRInstruction) -> Result<(), InterpreterError> {
         match inst {
             IRInstruction::BinOp {
@@ -742,6 +894,25 @@ impl Interpreter {
     }
 
     // Handle terminators
+    /// Evaluate an IR terminator and produce the interpreter's next control-flow action.
+    ///
+    /// Interprets `IRTerminator` variants and returns a `TerminatorResult` that describes the
+    /// next step (function return, block jump, conditional branch, or switch target). On error,
+    /// returns an `InterpreterError` describing the failure (e.g., type mismatch, no matching
+    /// switch case, unreachable terminator).
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// // Given an interpreter `interp` and a terminator `term`, obtain the next control action:
+    /// let result = interp.execute_terminator(&term)?;
+    /// match result {
+    ///     TerminatorResult::Return(val) => { /* handle return value */ }
+    ///     TerminatorResult::Jump(bb) => { /* jump to basic block */ }
+    ///     TerminatorResult::Branch { then_block, else_block, condition } => { /* conditional */ }
+    ///     TerminatorResult::Switch { target } => { /* switch dispatch */ }
+    /// }
+    /// ```
     fn execute_terminator(
         &mut self,
         term: &IRTerminator,
@@ -805,6 +976,25 @@ impl Interpreter {
     }
 
     // Evaluate an IRValue to a Value
+    /// Evaluate an IRValue into a runtime Value.
+    ///
+    /// For SSA values, looks up the corresponding runtime value in the current call frame's locals and
+    /// returns an `UndefinedValue` error if not found or a `TypeError` if no active frame exists.
+    /// `FunctionRef` values are represented as a pointer using the function's inner id. Literal and
+    /// unit IR values map directly to their corresponding runtime Value variants.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(Value)` containing the evaluated runtime value, or an `InterpreterError` describing why the
+    /// value could not be evaluated (e.g., missing frame, undefined SSA id, or unexpected IRValue kind).
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// // Given an interpreter `interp` and an IRValue::Int:
+    /// let v = interp.eval_value(&IRValue::Int(42)).unwrap();
+    /// assert_eq!(v, Value::Int(42));
+    /// ```
     fn eval_value(&mut self, ir_value: &IRValue) -> Result<Value, InterpreterError> {
         match ir_value {
             IRValue::Int(i) => Ok(Value::Int(*i)),
