@@ -4410,7 +4410,7 @@ fn test_builtin_print_macro_type_checking() {
         span: dummy_span(),
         file: dummy_file(),
         expr: ExprKind::MacroCall(
-            "print!".to_string(),
+            "print".to_string(),
             vec![Expr {
                 span: dummy_span(),
                 file: dummy_file(),
@@ -4441,7 +4441,7 @@ fn test_builtin_println_macro_type_checking() {
         span: dummy_span(),
         file: dummy_file(),
         expr: ExprKind::MacroCall(
-            "println!".to_string(),
+            "println".to_string(),
             vec![
                 Expr {
                     span: dummy_span(),
@@ -4479,7 +4479,7 @@ fn test_builtin_typeof_macro_type_checking() {
         span: dummy_span(),
         file: dummy_file(),
         expr: ExprKind::MacroCall(
-            "typeof!".to_string(),
+            "typeof".to_string(),
             vec![Expr {
                 span: dummy_span(),
                 file: dummy_file(),
@@ -4509,7 +4509,7 @@ fn test_builtin_input_macro_type_checking() {
     let input_macro = Expr {
         span: dummy_span(),
         file: dummy_file(),
-        expr: ExprKind::MacroCall("input!".to_string(), vec![], crate::ast::Delimiter::Paren),
+        expr: ExprKind::MacroCall("input".to_string(), vec![], crate::ast::Delimiter::Paren),
     };
 
     let typed = tc.check_expr(&input_macro);
@@ -4533,7 +4533,7 @@ fn test_builtin_macro_wrong_arity() {
         span: dummy_span(),
         file: dummy_file(),
         expr: ExprKind::MacroCall(
-            "typeof!".to_string(),
+            "typeof".to_string(),
             vec![
                 Expr {
                     span: dummy_span(),
@@ -4573,7 +4573,7 @@ fn test_builtin_input_macro_wrong_args() {
         span: dummy_span(),
         file: dummy_file(),
         expr: ExprKind::MacroCall(
-            "input!".to_string(),
+            "input".to_string(),
             vec![Expr {
                 span: dummy_span(),
                 file: dummy_file(),

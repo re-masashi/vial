@@ -3827,7 +3827,7 @@ impl TypeChecker {
                             type_: self.string_type(), // typeof! returns a string
                         }
                     }
-                    "input!" => {
+                    "input" => {
                         // input! takes no arguments
                         if !args.is_empty() {
                             self.diagnostics.add_type_error(TypeError {

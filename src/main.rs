@@ -536,3 +536,130 @@ fn report_type_diagnostics(
         .diagnostics
         .report_all(&type_checker.interner, token_spans, &sources);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_set_file_names_in_ast() {
+        // Create a simple AST node for testing
+        let mut nodes = vec![ASTNode {
+            span: 0..1,
+            file: "".to_string(),
+            node: ASTNodeKind::Expr(Expr {
+                span: 0..1,
+                file: "".to_string(),
+                expr: ExprKind::Int(42),
+            }),
+            attributes: vec![],
+        }];
+
+        set_file_names_in_ast(&mut nodes, "test.ni");
+
+        assert_eq!(nodes[0].file, "test.ni");
+        if let ASTNodeKind::Expr(ref expr) = nodes[0].node {
+            assert_eq!(expr.file, "test.ni");
+        }
+    }
+
+    #[test]
+    fn test_set_file_names_in_ast_node() {
+        let mut node = ASTNode {
+            span: 0..1,
+            file: "".to_string(),
+            node: ASTNodeKind::Expr(Expr {
+                span: 0..1,
+                file: "".to_string(),
+                expr: ExprKind::Int(42),
+            }),
+            attributes: vec![],
+        };
+
+        set_file_names_in_ast_node(&mut node, "test.ni");
+
+        assert_eq!(node.file, "test.ni");
+        if let ASTNodeKind::Expr(ref expr) = node.node {
+            assert_eq!(expr.file, "test.ni");
+        }
+    }
+
+    #[test]
+    fn test_set_file_names_in_expr() {
+        let mut expr = Expr {
+            span: 0..1,
+            file: "".to_string(),
+            expr: ExprKind::Int(42),
+        };
+
+        set_file_names_in_expr(&mut expr, "test.ni");
+        assert_eq!(expr.file, "test.ni");
+    }
+
+    #[test]
+    fn test_set_file_names_in_expr_with_nested_structure() {
+        // Test with a nested structure
+        let mut expr = Expr {
+            span: 0..1,
+            file: "".to_string(),
+            expr: ExprKind::Let {
+                var: "x".to_string(),
+                type_annot: None,
+                value: Box::new(Expr {
+                    span: 0..1,
+                    file: "".to_string(),
+                    expr: ExprKind::Int(42),
+                }),
+            },
+        };
+
+        set_file_names_in_expr(&mut expr, "test.ni");
+        assert_eq!(expr.file, "test.ni");
+
+        if let ExprKind::Let { value, .. } = &expr.expr {
+            assert_eq!(value.file, "test.ni");
+        }
+    }
+
+    #[test]
+    fn test_set_file_names_in_expr_with_multiple_kinds() {
+        // Test different expr kinds
+        let mut expr = Expr {
+            span: 0..1,
+            file: "".to_string(),
+            expr: ExprKind::IfElse {
+                condition: Box::new(Expr {
+                    span: 0..1,
+                    file: "".to_string(),
+                    expr: ExprKind::Bool(true),
+                }),
+                then: Box::new(Expr {
+                    span: 0..1,
+                    file: "".to_string(),
+                    expr: ExprKind::Int(1),
+                }),
+                else_: Some(Box::new(Expr {
+                    span: 0..1,
+                    file: "".to_string(),
+                    expr: ExprKind::Int(0),
+                })),
+            },
+        };
+
+        set_file_names_in_expr(&mut expr, "test.ni");
+        assert_eq!(expr.file, "test.ni");
+
+        if let ExprKind::IfElse {
+            condition,
+            then,
+            else_,
+        } = &expr.expr
+        {
+            assert_eq!(condition.file, "test.ni");
+            assert_eq!(then.file, "test.ni");
+            if let Some(else_expr) = else_ {
+                assert_eq!(else_expr.file, "test.ni");
+            }
+        }
+    }
+}

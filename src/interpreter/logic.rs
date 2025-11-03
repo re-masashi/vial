@@ -848,4 +848,26 @@ mod tests {
         let interpreter = Interpreter::new(module);
         assert_eq!(interpreter.call_stack.len(), 0);
     }
+
+    #[test]
+    fn test_terminator_result_debug() {
+        // Test that the TerminatorResult enum can be debug formatted
+        let return_result = TerminatorResult::Return(Value::Int(42));
+        assert!(format!("{:?}", return_result).contains("Return"));
+
+        let jump_result = TerminatorResult::Jump(BasicBlockId(1));
+        assert!(format!("{:?}", jump_result).contains("Jump"));
+
+        let branch_result = TerminatorResult::Branch {
+            then_block: BasicBlockId(2),
+            else_block: BasicBlockId(3),
+            condition: true,
+        };
+        assert!(format!("{:?}", branch_result).contains("Branch"));
+
+        let switch_result = TerminatorResult::Switch {
+            target: BasicBlockId(4),
+        };
+        assert!(format!("{:?}", switch_result).contains("Switch"));
+    }
 }
