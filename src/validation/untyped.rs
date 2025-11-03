@@ -204,20 +204,12 @@ impl UntypedValidator {
                     }
                     "input" => {
                         // input! macro: returns user input as a string
-                        if !args.is_empty() {
-                            // This error should ideally be caught at type checking, but we add it here for safety
-                            ExprKind::String("".to_string()) // Return empty string for safety
-                        } else {
-                            // Create a call to the builtin input function
-                            ExprKind::Call(
-                                Box::new(Expr {
-                                    span: expr.span.clone(),
-                                    file: expr.file.clone(),
-                                    expr: ExprKind::Variable("input".to_string()),
-                                }),
-                                vec![], // input! takes no arguments
-                            )
-                        }
+                        // Don't desugar here, keep as macro call for type checker to handle
+                        let desugared_args: Vec<_> = args
+                            .iter()
+                            .map(|arg| self.desugar_expr_in_macro(arg))
+                            .collect();
+                        ExprKind::MacroCall(name.to_string(), desugared_args, delimiter.clone())
                     }
                     _ => {
                         // For non-builtin macros, just desugar the arguments (but built-in macros shouldn't reach here in the normal flow since they're handled elsewhere)

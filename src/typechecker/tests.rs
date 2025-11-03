@@ -4505,11 +4505,19 @@ fn test_builtin_typeof_macro_type_checking() {
 fn test_builtin_input_macro_type_checking() {
     let mut tc = setup();
 
-    // Test input! macro with no arguments
+    // Test input! macro with one argument (prompt string)
     let input_macro = Expr {
         span: dummy_span(),
         file: dummy_file(),
-        expr: ExprKind::MacroCall("input".to_string(), vec![], crate::ast::Delimiter::Paren),
+        expr: ExprKind::MacroCall(
+            "input".to_string(),
+            vec![Expr {
+                span: dummy_span(),
+                file: dummy_file(),
+                expr: ExprKind::String("Enter value: ".to_string()),
+            }],
+            crate::ast::Delimiter::Paren,
+        ),
     };
 
     let typed = tc.check_expr(&input_macro);
@@ -4568,22 +4576,43 @@ fn test_builtin_macro_wrong_arity() {
 fn test_builtin_input_macro_wrong_args() {
     let mut tc = setup();
 
-    // Test input! with arguments
+    // Test input! with no arguments (should fail)
     let input_macro = Expr {
         span: dummy_span(),
         file: dummy_file(),
         expr: ExprKind::MacroCall(
             "input".to_string(),
-            vec![Expr {
-                span: dummy_span(),
-                file: dummy_file(),
-                expr: ExprKind::Int(42),
-            }],
+            vec![], // No arguments - should fail
             crate::ast::Delimiter::Paren,
         ),
     };
 
     let _typed = tc.check_expr(&input_macro);
+    assert!(tc.diagnostics.has_errors());
+
+    // Test input! with too many arguments (should fail)
+    let input_macro2 = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::MacroCall(
+            "input".to_string(),
+            vec![
+                Expr {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    expr: ExprKind::String("prompt1".to_string()),
+                },
+                Expr {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    expr: ExprKind::String("prompt2".to_string()),
+                },
+            ], // Two arguments - should fail
+            crate::ast::Delimiter::Paren,
+        ),
+    };
+
+    let _typed2 = tc.check_expr(&input_macro2);
     assert!(tc.diagnostics.has_errors());
 
     // Should have an arity mismatch error

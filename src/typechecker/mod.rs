@@ -3828,13 +3828,15 @@ impl TypeChecker {
                         }
                     }
                     "input" => {
-                        // input! takes no arguments
-                        if !args.is_empty() {
+                        let typed_args: Vec<_> = args.iter().map(|a| self.check_expr(a)).collect();
+
+                        // input! takes one argument (the prompt string)
+                        if args.len() != 1 {
                             self.diagnostics.add_type_error(TypeError {
                                 span: expr.span.clone(),
                                 file: expr.file.clone(),
                                 kind: TypeErrorKind::ArityMismatch {
-                                    expected: 0,
+                                    expected: 1,
                                     found: args.len(),
                                     function: name_sym,
                                 },
@@ -3849,7 +3851,7 @@ impl TypeChecker {
                             expr: TypedExprKind::MacroCall {
                                 name: name_sym,
                                 macro_id: MacroId(0),
-                                args: vec![], // No arguments for input!
+                                args: typed_args, // input! takes one argument (the prompt)
                                 delimiter: delimiter.clone(),
                             },
                             type_: self.string_type(), // input! returns a string

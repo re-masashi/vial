@@ -48,6 +48,8 @@ pub fn execute_builtin(name: &str, args: Vec<Value>) -> Result<Value, Interprete
         }
 
         "input" => {
+            print_values(&args);
+            std::io::Write::flush(&mut std::io::stdout()).map_err(InterpreterError::IOError)?;
             let mut buffer = String::new();
             io::stdin()
                 .read_line(&mut buffer)
