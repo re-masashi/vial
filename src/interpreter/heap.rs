@@ -37,7 +37,8 @@ impl Heap {
     /// # Examples
     ///
     /// ```
-    /// use crate::interpreter::{heap::Heap, heap::HeapObject};
+    /// use vial::interpreter::heap::*;
+    /// use vial::interpreter::value::Value;
     ///
     /// let mut heap = Heap::new();
     /// let ptr = heap.allocate(HeapObject::Array { elements: vec![] });
@@ -55,6 +56,9 @@ impl Heap {
     /// # Examples
     ///
     /// ```
+    /// use vial::interpreter::heap::*;
+    /// use vial::interpreter::value::Value;
+    ///
     /// let mut heap = Heap::new();
     /// let ptr = heap.allocate(HeapObject::Array { elements: vec![] });
     /// assert_eq!(ptr.id, 0);
@@ -77,6 +81,9 @@ impl Heap {
     /// # Examples
     ///
     /// ```
+    /// use vial::interpreter::heap::*;
+    /// use vial::interpreter::value::Value;
+    ///
     /// let mut heap = Heap::new();
     /// let ptr = heap.allocate(HeapObject::Array { elements: vec![] });
     /// let obj = heap.get(ptr).unwrap();
@@ -101,6 +108,9 @@ impl Heap {
     /// # Examples
     ///
     /// ```
+    /// use vial::interpreter::heap::*;
+    /// use vial::interpreter::value::Value;
+    ///
     /// let mut heap = Heap::new();
     /// let ptr = heap.allocate(HeapObject::Array { elements: vec![Value::Int(1)] });
     ///
@@ -133,6 +143,9 @@ impl Heap {
     /// # Examples
     ///
     /// ```
+    /// use vial::interpreter::heap::*;
+    /// use vial::interpreter::value::Value;
+    ///
     /// let mut heap = Heap::new();
     /// let ptr = heap.allocate(HeapObject::Array { elements: vec![] });
     /// let obj = heap.deallocate(ptr).unwrap();

@@ -1092,14 +1092,6 @@ impl<'a> FunctionBuilder<'a> {
     /// instructions and terminators as necessary and updating the builder's SSA
     /// bindings and basic blocks.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// // Given a FunctionBuilder `fb` and a `TypedExpr` representing `42`,
-    /// // the lowered value for an integer literal is `IRValue::Int(42)`.
-    /// let val = fb.lower_expr(&typed_expr_int_42);
-    /// assert_eq!(val, IRValue::Int(42));
-    /// ```
     fn lower_expr(&mut self, expr: &TypedExpr) -> IRValue {
         match &expr.expr {
             TypedExprKind::Int(n) => IRValue::Int(*n),

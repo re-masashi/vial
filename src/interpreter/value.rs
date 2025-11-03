@@ -23,6 +23,7 @@ impl Value {
     /// # Examples
     ///
     /// ```
+    /// use vial::interpreter::value::Value;
     /// let v = Value::Int(42);
     /// assert_eq!(v.as_int().unwrap(), 42);
     /// ```
@@ -45,6 +46,7 @@ impl Value {
     /// # Examples
     ///
     /// ```
+    /// use vial::interpreter::value::Value;
     /// let v = Value::Float(1.23);
     /// assert_eq!(v.as_float().unwrap(), 1.23);
     /// ```
@@ -68,7 +70,7 @@ impl Value {
     /// # Examples
     ///
     /// ```
-    /// use crate::interpreter::value::Value;
+    /// use vial::interpreter::value::Value;
     /// let v = Value::Bool(true);
     /// assert_eq!(v.as_bool().unwrap(), true);
     /// ```
@@ -90,7 +92,7 @@ impl Value {
     /// # Examples
     ///
     /// ```
-    /// use crate::interpreter::value::{Value, HeapPtr};
+    /// use vial::interpreter::value::{Value, HeapPtr};
     ///
     /// let v = Value::Ptr(HeapPtr { id: 3 });
     /// let p = v.as_ptr().unwrap();
@@ -115,6 +117,8 @@ impl Value {
     /// # Examples
     ///
     /// ```
+    /// use vial::interpreter::value::Value;
+    ///
     /// let v = Value::Int(42);
     /// assert_eq!(v.type_name(), "int");
     /// let s = Value::String(String::from("hi"));
@@ -146,6 +150,8 @@ impl Value {
     /// # Examples
     ///
     /// ```
+    /// use vial::interpreter::value::Value;
+    ///
     /// // integer addition
     /// let r = Value::Int(2).add(&Value::Int(3)).unwrap();
     /// assert_eq!(r, Value::Int(5));
@@ -186,7 +192,7 @@ impl Value {
     /// # Examples
     ///
     /// ```
-    /// use crate::interpreter::value::Value;
+    /// use vial::interpreter::value::Value;
     ///
     /// let a = Value::Int(10);
     /// let b = Value::Float(2.5);
@@ -217,7 +223,7 @@ impl Value {
     /// # Examples
     ///
     /// ```
-    /// use crate::interpreter::value::Value;
+    /// use vial::interpreter::value::Value;
     ///
     /// let a = Value::Int(6);
     /// let b = Value::Int(7);
@@ -254,6 +260,8 @@ impl Value {
     /// # Examples
     ///
     /// ```
+    /// use vial::interpreter::value::Value;
+    ///
     /// let a = Value::Int(6);
     /// let b = Value::Int(2);
     /// assert_eq!(a.div(&b).unwrap(), Value::Int(3));
@@ -315,6 +323,8 @@ impl Value {
     /// # Examples
     ///
     /// ```
+    /// use vial::interpreter::value::Value;
+    ///
     /// let a = Value::Int(42);
     /// let b = Value::Int(42);
     /// assert_eq!(a.eq(&b).unwrap(), Value::Bool(true));
@@ -347,7 +357,7 @@ impl Value {
     /// # Examples
     ///
     /// ```
-    /// use crate::interpreter::value::Value;
+    /// use vial::interpreter::value::Value;
     ///
     /// assert_eq!(Value::Int(1).lt(&Value::Int(2)).unwrap(), Value::Bool(true));
     /// assert_eq!(Value::Float(1.5).lt(&Value::Float(1.5)).unwrap(), Value::Bool(false));
@@ -379,8 +389,8 @@ impl Value {
     /// # Examples
     ///
     /// ```
-    /// # use crate::interpreter::value::{Value};
-    /// # use crate::interpreter::error::InterpreterError;
+    /// use vial::interpreter::value::Value;
+    ///
     /// let a = Value::Int(3);
     /// let b = Value::Int(2);
     /// assert_eq!(a.gt(&b).unwrap(), Value::Bool(true));
@@ -416,6 +426,8 @@ impl Value {
     /// # Examples
     ///
     /// ```
+    /// use vial::interpreter::value::Value;
+    ///
     /// let a = Value::Int(1);
     /// let b = Value::Int(2);
     /// assert_eq!(a.le(&b).unwrap(), Value::Bool(true));
@@ -449,7 +461,7 @@ impl Value {
     /// # Examples
     ///
     /// ```
-    /// use crate::interpreter::value::Value;
+    /// use vial::interpreter::value::Value;
     ///
     /// let a = Value::Int(3);
     /// let b = Value::Int(2);
@@ -480,6 +492,8 @@ impl Value {
     /// # Examples
     ///
     /// ```
+    /// use vial::interpreter::value::Value;
+    ///
     /// let a = Value::Int(1);
     /// let b = Value::Int(2);
     /// assert_eq!(a.ne(&b).unwrap(), Value::Bool(true));
@@ -502,7 +516,7 @@ impl Value {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::interpreter::value::{HeapPtr, Value};
 
     #[test]
     fn test_value_creation() {

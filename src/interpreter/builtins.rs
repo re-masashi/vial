@@ -29,7 +29,7 @@ fn print_values(args: &[Value]) {
 /// # Examples
 ///
 /// ```
-/// # use crate::interpreter::{builtins::execute_builtin, value::Value, error::InterpreterError};
+/// use vial::interpreter::{builtins::execute_builtin, value::Value, error::InterpreterError};
 /// // Convert integer to string
 /// let res = execute_builtin("int_to_string", vec![Value::Int(42)]).unwrap();
 /// assert_eq!(res, Value::String("42".to_string()));
@@ -213,7 +213,6 @@ mod tests {
             _ => panic!("Expected TypeError"),
         }
     }
-}
 
     #[test]
     fn test_bool_to_string_builtin() {
