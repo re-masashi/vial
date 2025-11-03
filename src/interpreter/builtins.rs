@@ -3,6 +3,19 @@ use std::io::{self};
 use super::error::InterpreterError;
 use super::value::Value;
 
+fn print_values(args: &[Value]) {
+    for arg in args {
+        match arg {
+            Value::Int(i) => print!("{}", i),
+            Value::Float(f) => print!("{}", f),
+            Value::Bool(b) => print!("{}", b),
+            Value::String(s) => print!("{}", s),
+            Value::Ptr(_) => print!("<ptr>"),
+            Value::Null => print!("null"),
+        }
+    }
+}
+
 /// Executes a runtime builtin by name using the given arguments.
 ///
 /// This dispatches the builtin identified by `name` and returns the result of that operation
@@ -24,30 +37,12 @@ use super::value::Value;
 pub fn execute_builtin(name: &str, args: Vec<Value>) -> Result<Value, InterpreterError> {
     match name {
         "print" => {
-            for arg in args {
-                match arg {
-                    Value::Int(i) => print!("{}", i),
-                    Value::Float(f) => print!("{}", f),
-                    Value::Bool(b) => print!("{}", b),
-                    Value::String(s) => print!("{}", s),
-                    Value::Ptr(_) => print!("<ptr>"),
-                    Value::Null => print!("null"),
-                }
-            }
+            print_values(&args);
             Ok(Value::Null)
         }
 
         "println" => {
-            for arg in args {
-                match arg {
-                    Value::Int(i) => print!("{}", i),
-                    Value::Float(f) => print!("{}", f),
-                    Value::Bool(b) => print!("{}", b),
-                    Value::String(s) => print!("{}", s),
-                    Value::Ptr(_) => print!("<ptr>"),
-                    Value::Null => print!("null"),
-                }
-            }
+            print_values(&args);
             println!();
             Ok(Value::Null)
         }
@@ -104,12 +99,43 @@ pub fn execute_builtin(name: &str, args: Vec<Value>) -> Result<Value, Interprete
             }
         }
 
+        "bool_to_string" => {
+            if args.len() != 1 {
+                return Err(InterpreterError::TypeError {
+                    expected: "one argument",
+                    got: format!("{} arguments", args.len()),
+                });
+            }
+            match &args[0] {
+                Value::Bool(b) => Ok(Value::String(if *b {
+                    "true".to_string()
+                } else {
+                    "false".to_string()
+                })),
+                _ => Err(InterpreterError::TypeError {
+                    expected: "bool",
+                    got: args[0].type_name().to_string(),
+                }),
+            }
+        }
+
+        "typeof" => {
+            if args.len() != 1 {
+                return Err(InterpreterError::TypeError {
+                    expected: "one argument",
+                    got: format!("{} arguments", args.len()),
+                });
+            }
+            Ok(Value::String(args[0].type_name().to_string()))
+        }
+
         _ => Err(InterpreterError::UnknownBuiltin(name.to_string())),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::value::HeapPtr;
     use super::*;
 
     #[test]
@@ -186,5 +212,67 @@ mod tests {
             }
             _ => panic!("Expected TypeError"),
         }
+    }
+}
+
+    #[test]
+    fn test_bool_to_string_builtin() {
+        // Test true
+        let args = vec![Value::Bool(true)];
+        let result = execute_builtin("bool_to_string", args).unwrap();
+        assert_eq!(result, Value::String("true".to_string()));
+
+        // Test false
+        let args = vec![Value::Bool(false)];
+        let result = execute_builtin("bool_to_string", args).unwrap();
+        assert_eq!(result, Value::String("false".to_string()));
+
+        // Test with wrong type
+        let args = vec![Value::Int(123)];
+        let result = execute_builtin("bool_to_string", args);
+        assert!(result.is_err());
+
+        // Test with wrong number of arguments
+        let args = vec![Value::Bool(true), Value::Bool(false)];
+        let result = execute_builtin("bool_to_string", args);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_typeof_builtin() {
+        // Test with int
+        let args = vec![Value::Int(42)];
+        let result = execute_builtin("typeof", args).unwrap();
+        assert_eq!(result, Value::String("int".to_string()));
+
+        // Test with bool
+        let args = vec![Value::Bool(true)];
+        let result = execute_builtin("typeof", args).unwrap();
+        assert_eq!(result, Value::String("bool".to_string()));
+
+        // Test with string
+        let args = vec![Value::String("hello".to_string())];
+        let result = execute_builtin("typeof", args).unwrap();
+        assert_eq!(result, Value::String("string".to_string()));
+
+        // Test with float
+        let args = vec![Value::Float(3.14)];
+        let result = execute_builtin("typeof", args).unwrap();
+        assert_eq!(result, Value::String("float".to_string()));
+
+        // Test with null
+        let args = vec![Value::Null];
+        let result = execute_builtin("typeof", args).unwrap();
+        assert_eq!(result, Value::String("null".to_string()));
+
+        // Test with pointer
+        let args = vec![Value::Ptr(HeapPtr { id: 1 })];
+        let result = execute_builtin("typeof", args).unwrap();
+        assert_eq!(result, Value::String("ptr".to_string()));
+
+        // Test with wrong number of arguments
+        let args = vec![Value::Int(1), Value::Int(2)];
+        let result = execute_builtin("typeof", args);
+        assert!(result.is_err());
     }
 }
