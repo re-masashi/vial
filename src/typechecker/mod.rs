@@ -3780,7 +3780,7 @@ impl TypeChecker {
 
                 // Handle builtin macros specially
                 match name.as_str() {
-                    "println!" | "print!" => {
+                    "println" | "print" => {
                         // Type check the arguments (all args will be converted to strings and concatenated)
                         let typed_args: Vec<_> = args.iter().map(|a| self.check_expr(a)).collect();
 
@@ -3797,7 +3797,7 @@ impl TypeChecker {
                             type_: self.unit_type(), // print macros return unit
                         }
                     }
-                    "typeof!" => {
+                    "typeof" => {
                         if args.len() != 1 {
                             self.diagnostics.add_type_error(TypeError {
                                 span: expr.span.clone(),

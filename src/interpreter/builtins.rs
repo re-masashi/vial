@@ -3,33 +3,28 @@ use std::io::{self};
 use super::error::InterpreterError;
 use super::value::Value;
 
+fn print_values(args: &[Value]) {
+    for arg in args {
+        match arg {
+            Value::Int(i) => print!("{}", i),
+            Value::Float(f) => print!("{}", f),
+            Value::Bool(b) => print!("{}", b),
+            Value::String(s) => print!("{}", s),
+            Value::Ptr(_) => print!("<ptr>"),
+            Value::Null => print!("null"),
+        }
+    }
+}
+
 pub fn execute_builtin(name: &str, args: Vec<Value>) -> Result<Value, InterpreterError> {
     match name {
         "print" => {
-            for arg in args {
-                match arg {
-                    Value::Int(i) => print!("{}", i),
-                    Value::Float(f) => print!("{}", f),
-                    Value::Bool(b) => print!("{}", b),
-                    Value::String(s) => print!("{}", s),
-                    Value::Ptr(_) => print!("<ptr>"),
-                    Value::Null => print!("null"),
-                }
-            }
+            print_values(&args);
             Ok(Value::Null)
         }
 
         "println" => {
-            for arg in args {
-                match arg {
-                    Value::Int(i) => print!("{}", i),
-                    Value::Float(f) => print!("{}", f),
-                    Value::Bool(b) => print!("{}", b),
-                    Value::String(s) => print!("{}", s),
-                    Value::Ptr(_) => print!("<ptr>"),
-                    Value::Null => print!("null"),
-                }
-            }
+            print_values(&args);
             println!();
             Ok(Value::Null)
         }

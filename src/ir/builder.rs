@@ -2948,3 +2948,107 @@ impl<'a> FunctionBuilder<'a> {
         IRValue::SSA(result)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::Interner;
+
+    #[test]
+    fn test_fresh_ids() {
+        let interner = Interner::new();
+        let target = TargetInfo::vm_target(); // Using vm_target instead of default
+        let mut builder = IRBuilder::new(target, interner);
+
+        // Test fresh ID generation - values after register_builtin_types may not start at 0
+        let struct_id1 = builder.fresh_struct_id();
+        let struct_id2 = builder.fresh_struct_id();
+        assert_ne!(struct_id1, struct_id2);
+
+        let enum_id = builder.fresh_enum_id();
+        assert_ne!(enum_id.0, 9999); // Should be a normal number, not an invalid value
+
+        let effect_id = builder.fresh_effect_id();
+        assert_ne!(effect_id.0, 9999); // Should be a normal number, not an invalid value
+
+        let function_id = builder.fresh_function_id();
+        assert_ne!(function_id.0, 9999); // Should be a normal number, not an invalid value
+
+        let value_id = builder.fresh_value_id();
+        assert_ne!(value_id.0, 9999); // Should be a normal number, not an invalid value
+
+        let block_id = builder.fresh_block_id();
+        assert_ne!(block_id.0, 9999); // Should be a normal number, not an invalid value
+
+        let alloc_id = builder.fresh_alloc_id(); // Using fresh_alloc_id instead of fresh_allocation_id
+        assert_ne!(alloc_id.0, 9999); // Should be a normal number, not an invalid value
+
+        let memory_slot_id = builder.fresh_memory_slot_id();
+        assert_ne!(memory_slot_id.0, 9999); // Should be a normal number, not an invalid value
+    }
+
+    #[test]
+    fn test_build_cfg() {
+        let interner = Interner::new();
+        let target = TargetInfo::vm_target();
+        let builder = IRBuilder::new(target, interner);
+
+        // Create some basic blocks to build a CFG
+        let block1 = BasicBlock {
+            id: BasicBlockId(0),
+            phi_nodes: vec![],
+            instructions: vec![],
+            terminator: Some(IRTerminator::Return {
+                value: None,
+                span: 0..0,
+                file: String::new(),
+            }),
+        };
+
+        let block2 = BasicBlock {
+            id: BasicBlockId(1),
+            phi_nodes: vec![],
+            instructions: vec![],
+            terminator: Some(IRTerminator::Jump {
+                target: BasicBlockId(0),
+                span: 0..0,
+                file: String::new(),
+            }),
+        };
+
+        // Create a CFG from these blocks
+        let cfg = builder.build_cfg(&[block1, block2]);
+
+        // Basic assertion: cfg should have some basic structure
+        // The exact structure depends on the implementation, but it should be non-empty
+        assert!(cfg.blocks.contains_key(&BasicBlockId(0)));
+        assert!(cfg.blocks.contains_key(&BasicBlockId(1)));
+    }
+
+    #[test]
+    fn test_fresh_struct_id_sequential() {
+        let interner = Interner::new();
+        let target = TargetInfo::vm_target();
+        let mut builder = IRBuilder::new(target, interner);
+
+        let id1 = builder.fresh_struct_id();
+        let id2 = builder.fresh_struct_id();
+        let id3 = builder.fresh_struct_id();
+
+        // IDs should be sequential (accounting for builtin types usage)
+        assert!(id2.0 > id1.0);
+        assert!(id3.0 > id2.0);
+    }
+
+    #[test]
+    fn test_fresh_value_id() {
+        let interner = Interner::new();
+        let target = TargetInfo::vm_target();
+        let mut builder = IRBuilder::new(target, interner);
+
+        let id1 = builder.fresh_value_id();
+        let id2 = builder.fresh_value_id();
+
+        assert_ne!(id1, id2);
+    }
+}

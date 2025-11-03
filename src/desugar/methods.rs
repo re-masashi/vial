@@ -574,3 +574,35 @@ fn desugar_pattern(pattern: Pattern) -> Pattern {
         pat: new_pat,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_method_call_desugarer_new() {
+        let mut desugarer = MethodCallDesugarer::new();
+        // This test verifies the constructor works by trying to use the instance
+        let empty_program = vec![];
+        let result = desugarer.desugar_program(empty_program);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_method_call_desugarer_default() {
+        let mut desugarer = MethodCallDesugarer::default();
+        // This test verifies the default constructor works by trying to use the instance
+        let empty_program = vec![];
+        let result = desugarer.desugar_program(empty_program);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_desugar_empty_program() {
+        let mut desugarer = MethodCallDesugarer::new();
+        let empty_program = vec![];
+        let result = desugarer.desugar_program(empty_program);
+
+        assert!(result.is_empty());
+    }
+}

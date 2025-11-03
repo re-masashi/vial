@@ -1011,7 +1011,7 @@ impl Monomorphizer {
                 // For builtin macros, resolve the return type to concrete types
                 let macro_name_str = self.interner.resolve(name);
                 let resolved_type = match macro_name_str {
-                    "println" | "print" | "println!" | "print!" => {
+                    "println" | "print" => {
                         // These macros return unit
                         Rc::new(Type {
                             span: expr.type_.span.clone(),
@@ -1023,7 +1023,7 @@ impl Monomorphizer {
                             },
                         })
                     }
-                    "input" | "input!" => {
+                    "input" => {
                         // input! returns string
                         Rc::new(Type {
                             span: expr.type_.span.clone(),
@@ -1035,7 +1035,7 @@ impl Monomorphizer {
                             },
                         })
                     }
-                    "typeof" | "typeof!" => {
+                    "typeof" => {
                         // typeof! returns string
                         Rc::new(Type {
                             span: expr.type_.span.clone(),
