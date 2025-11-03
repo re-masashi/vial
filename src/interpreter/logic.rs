@@ -553,25 +553,59 @@ impl Interpreter {
                         let base_ptr = addr_val.as_ptr()?;
                         let obj = self.heap.get(base_ptr)?;
 
-                        if let super::heap::HeapObject::Struct { fields, .. } = obj {
-                            let field_val =
-                                fields
-                                    .get(field)
-                                    .cloned()
-                                    .ok_or(InterpreterError::TypeError {
+                        match obj {
+                            super::heap::HeapObject::Struct { fields, .. } => {
+                                let field_val = fields.get(field).cloned().ok_or(
+                                    InterpreterError::TypeError {
                                         expected: "valid struct field",
                                         got: format!("field id: {:?}", field),
-                                    })?;
-                            self.call_stack
-                                .current()
-                                .unwrap()
-                                .locals
-                                .insert(*result, field_val);
-                        } else {
-                            return Err(InterpreterError::TypeError {
-                                expected: "struct object",
-                                got: "non-struct object".to_string(),
-                            });
+                                    },
+                                )?;
+                                self.call_stack
+                                    .current()
+                                    .unwrap()
+                                    .locals
+                                    .insert(*result, field_val);
+                            }
+                            super::heap::HeapObject::Enum { data, .. } => {
+                                // Convert field to payload index (subtract 1 to account for discriminant)
+                                let payload_index = if field.0 > 0 {
+                                    field.0 - 1
+                                } else {
+                                    return Err(InterpreterError::TypeError {
+                                        expected: "valid enum payload field",
+                                        got: format!(
+                                            "field id: {:?} (invalid for enum payload)",
+                                            field
+                                        ),
+                                    });
+                                };
+
+                                if payload_index < data.len() {
+                                    let field_val = data[payload_index].clone();
+                                    self.call_stack
+                                        .current()
+                                        .unwrap()
+                                        .locals
+                                        .insert(*result, field_val);
+                                } else {
+                                    return Err(InterpreterError::TypeError {
+                                        expected: "valid enum payload field",
+                                        got: format!(
+                                            "field id: {:?} (index {} >= {})",
+                                            field,
+                                            payload_index,
+                                            data.len()
+                                        ),
+                                    });
+                                }
+                            }
+                            _ => {
+                                return Err(InterpreterError::TypeError {
+                                    expected: "struct or enum object",
+                                    got: "non-struct/enum object".to_string(),
+                                });
+                            }
                         }
                     }
                     _ => {
@@ -654,25 +688,59 @@ impl Interpreter {
                 let target_ptr = target_val.as_ptr()?;
                 let obj = self.heap.get(target_ptr)?;
 
-                if let super::heap::HeapObject::Struct { fields, .. } = obj {
-                    let field_val =
-                        fields
-                            .get(field_id)
-                            .cloned()
-                            .ok_or(InterpreterError::TypeError {
-                                expected: "valid struct field",
-                                got: format!("field id: {:?}", field_id),
-                            })?;
-                    self.call_stack
-                        .current()
-                        .unwrap()
-                        .locals
-                        .insert(*result, field_val);
-                } else {
-                    return Err(InterpreterError::TypeError {
-                        expected: "struct object",
-                        got: "non-struct object".to_string(),
-                    });
+                match obj {
+                    super::heap::HeapObject::Struct { fields, .. } => {
+                        let field_val =
+                            fields
+                                .get(field_id)
+                                .cloned()
+                                .ok_or(InterpreterError::TypeError {
+                                    expected: "valid struct field",
+                                    got: format!("field id: {:?}", field_id),
+                                })?;
+                        self.call_stack
+                            .current()
+                            .unwrap()
+                            .locals
+                            .insert(*result, field_val);
+                    }
+                    super::heap::HeapObject::Enum { data, .. } => {
+                        // Convert field_id to payload index (subtract 1 because field_id 0 is the discriminant)
+                        // This follows the pattern in extract_enum_field where field_id = field_index + 1
+                        let payload_index = if field_id.0 > 0 {
+                            field_id.0 - 1
+                        } else {
+                            return Err(InterpreterError::TypeError {
+                                expected: "valid enum payload field",
+                                got: format!("field id: {:?} (invalid for enum payload)", field_id),
+                            });
+                        };
+
+                        if payload_index < data.len() {
+                            let field_val = data[payload_index].clone();
+                            self.call_stack
+                                .current()
+                                .unwrap()
+                                .locals
+                                .insert(*result, field_val);
+                        } else {
+                            return Err(InterpreterError::TypeError {
+                                expected: "valid enum payload field",
+                                got: format!(
+                                    "field id: {:?} (index {} >= {})",
+                                    field_id,
+                                    payload_index,
+                                    data.len()
+                                ),
+                            });
+                        }
+                    }
+                    _ => {
+                        return Err(InterpreterError::TypeError {
+                            expected: "struct or enum object",
+                            got: "non-struct/enum object".to_string(),
+                        });
+                    }
                 }
             }
 

@@ -1111,9 +1111,12 @@ impl<'a> FunctionBuilder<'a> {
                         // This is a function reference
                         IRValue::FunctionRef(func_id)
                     } else {
-                        // This is likely a local variable that wasn't found (error case)
-                        let placeholder_value_id = self.builder.fresh_value_id();
-                        IRValue::SSA(placeholder_value_id)
+                        // This is an unknown variable that should have been handled by type checker
+                        let var_name = self.builder.interner.resolve(*name);
+                        panic!(
+                            "internal compiler error: unknown variable '{}' / binding id {} — should have been handled by the type checker",
+                            var_name, binding_id.0
+                        )
                     }
                 }
             }
