@@ -5926,7 +5926,7 @@ impl TypeChecker {
             span: None,
             file: None,
             type_: TypeKind::Constructor {
-                name: 1, // intern "Bool"
+                name: 1, // intern "bool"
                 args: vec![],
                 kind: Kind::Star,
             },

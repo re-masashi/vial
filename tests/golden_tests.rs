@@ -58,7 +58,6 @@ mod golden_tests {
         assert!(stdout_str.contains("hello world") || stderr_str.contains("hello world"));
     }
 
-    /// Test custom enums with unit variants - should type check without errors
     #[test]
     fn test_unit_enum_type_checking() {
         // Create a temporary file with unit enum usage
@@ -83,13 +82,11 @@ match x {
             file.write_all(test_content.as_bytes()).unwrap();
         }
 
-        // Run type checking only (no execution to avoid IR issues)
         let output = Command::new("cargo")
-            .args(&["run", "--", test_file])
+            .args(&["run", "--", test_file, "-e"])
             .output()
             .expect("Failed to execute command");
 
-        // Should complete type checking successfully without errors
         assert!(
             output.status.success(),
             "Type checking failed: {}",
@@ -100,7 +97,6 @@ match x {
         std::fs::remove_file(test_file).unwrap();
     }
 
-    /// Test custom enums with value variants - should type check without errors
     #[test]
     fn test_value_enum_type_checking() {
         // Create a temporary file with value enum usage
@@ -124,13 +120,11 @@ match x {
             file.write_all(test_content.as_bytes()).unwrap();
         }
 
-        // Run type checking only (no execution to avoid IR issues)
         let output = Command::new("cargo")
-            .args(&["run", "--", test_file])
+            .args(&["run", "--", test_file, "-e"])
             .output()
             .expect("Failed to execute command");
 
-        // Should complete type checking successfully without errors
         assert!(
             output.status.success(),
             "Type checking failed: {}",
@@ -162,7 +156,6 @@ match x {
             file.write_all(test_content.as_bytes()).unwrap();
         }
 
-        // Run type checking only
         let output = Command::new("cargo")
             .args(&["run", "--", test_file, "-e"])
             .output()
@@ -179,7 +172,6 @@ match x {
         std::fs::remove_file(test_file).unwrap();
     }
 
-    /// Test enum with multiple value fields - should type check without errors
     #[test]
     fn test_enum_multiple_fields() {
         let test_content = r#"
@@ -205,13 +197,11 @@ match point {
             file.write_all(test_content.as_bytes()).unwrap();
         }
 
-        // Run type checking only
         let output = Command::new("cargo")
-            .args(&["run", "--", test_file])
+            .args(&["run", "--", test_file, "-e"])
             .output()
             .expect("Failed to execute command");
 
-        // Should complete type checking successfully
         assert!(
             output.status.success(),
             "Enum with multiple fields failed: {}",
@@ -222,7 +212,6 @@ match point {
         std::fs::remove_file(test_file).unwrap();
     }
 
-    /// Test that enum patterns work correctly in match expressions
     #[test]
     fn test_enum_pattern_matching() {
         let test_content = r#"
@@ -249,13 +238,11 @@ result
             file.write_all(test_content.as_bytes()).unwrap();
         }
 
-        // Run type checking only
         let output = Command::new("cargo")
-            .args(&["run", "--", test_file])
+            .args(&["run", "--", test_file, "-e"])
             .output()
             .expect("Failed to execute command");
 
-        // Should complete successfully
         assert!(
             output.status.success(),
             "Enum pattern matching failed: {}",
@@ -266,7 +253,6 @@ result
         std::fs::remove_file(test_file).unwrap();
     }
 
-    /// Test enum with nested usage - should type check without errors
     #[test]
     fn test_nested_enum_usage() {
         let test_content = r#"
@@ -293,13 +279,11 @@ match user {
             file.write_all(test_content.as_bytes()).unwrap();
         }
 
-        // Run type checking only
         let output = Command::new("cargo")
-            .args(&["run", "--", test_file])
+            .args(&["run", "--", test_file, "-e"])
             .output()
             .expect("Failed to execute command");
 
-        // Should complete type checking successfully
         assert!(
             output.status.success(),
             "Nested enum usage failed: {}",
@@ -338,9 +322,8 @@ match color {
             file.write_all(test_content.as_bytes()).unwrap();
         }
 
-        // Run type checking only
         let output = Command::new("cargo")
-            .args(&["run", "--", test_file])
+            .args(&["run", "--", test_file, "-e"])
             .output()
             .expect("Failed to execute command");
 
@@ -355,7 +338,6 @@ match color {
         std::fs::remove_file(test_file).unwrap();
     }
 
-    /// Test forward reference enum usage - should type check without errors
     #[test]
     fn test_forward_ref_enum_usage() {
         let test_content = r#"
@@ -384,9 +366,8 @@ enum MyEnum {
             file.write_all(test_content.as_bytes()).unwrap();
         }
 
-        // Run type checking only
         let output = Command::new("cargo")
-            .args(&["run", "--", test_file])
+            .args(&["run", "--", test_file, "-e"])
             .output()
             .expect("Failed to execute command");
 
@@ -431,13 +412,11 @@ match x {
             file.write_all(test_content.as_bytes()).unwrap();
         }
 
-        // Run type checking only
         let output = Command::new("cargo")
-            .args(&["run", "--", test_file])
+            .args(&["run", "--", test_file, "-e"])
             .output()
             .expect("Failed to execute command");
 
-        // Should complete type checking successfully
         assert!(
             output.status.success(),
             "Mixed types enum failed: {}",
@@ -448,7 +427,6 @@ match x {
         std::fs::remove_file(test_file).unwrap();
     }
 
-    /// Test complex nested matching - should type check without errors
     #[test]
     fn test_complex_nested_matching() {
         let test_content = r#"
@@ -475,13 +453,11 @@ match res {
             file.write_all(test_content.as_bytes()).unwrap();
         }
 
-        // Run type checking only
         let output = Command::new("cargo")
-            .args(&["run", "--", test_file])
+            .args(&["run", "--", test_file, "-e"])
             .output()
             .expect("Failed to execute command");
 
-        // Should complete type checking successfully
         assert!(
             output.status.success(),
             "Complex nested matching failed: {}",
@@ -492,7 +468,6 @@ match res {
         std::fs::remove_file(test_file).unwrap();
     }
 
-    /// Test simple enum without matching (construction only) - should type check without errors
     #[test]
     fn test_enum_construct_only() {
         let test_content = r#"
@@ -511,9 +486,8 @@ let x = Simple::A;
             file.write_all(test_content.as_bytes()).unwrap();
         }
 
-        // Run type checking only
         let output = Command::new("cargo")
-            .args(&["run", "--", test_file])
+            .args(&["run", "--", test_file, "-e"])
             .output()
             .expect("Failed to execute command");
 
@@ -528,7 +502,6 @@ let x = Simple::A;
         std::fs::remove_file(test_file).unwrap();
     }
 
-    /// Test simple enum with match - should type check without errors
     #[test]
     fn test_simple_enum_with_match() {
         let test_content = r#"
@@ -551,18 +524,259 @@ match x {
             file.write_all(test_content.as_bytes()).unwrap();
         }
 
-        // Run type checking only
         let output = Command::new("cargo")
-            .args(&["run", "--", test_file])
+            .args(&["run", "--", test_file, "-e"])
             .output()
             .expect("Failed to execute command");
 
-        // Should complete type checking successfully
         assert!(
             output.status.success(),
             "Simple enum with match failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+
+        // Clean up
+        std::fs::remove_file(test_file).unwrap();
+    }
+
+    #[test]
+    fn test_struct_basic_definition_and_usage() {
+        let test_content = r#"
+struct Point {
+    x: int,
+    y: int,
+}
+
+def create_point(x: int, y: int) -> Point {
+    Point { x: x, y: y }
+}
+
+let point = create_point(3, 4);
+point.x + point.y  // 7
+"#;
+
+        let test_file = "test_struct_basic.vi";
+        {
+            use std::fs::File;
+            use std::io::Write;
+
+            let mut file = File::create(test_file).unwrap();
+            file.write_all(test_content.as_bytes()).unwrap();
+        }
+
+        let output = Command::new("cargo")
+            .args(&["run", "--", test_file, "-e"])
+            .output()
+            .expect("Failed to execute command");
+
+        assert!(
+            output.status.success(),
+            "Basic struct definition and usage failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        // Verify the result is 7
+        let stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
+        assert!(stdout_str.contains("Int(7)") || stdout_str.contains("7"));
+
+        // Clean up
+        std::fs::remove_file(test_file).unwrap();
+    }
+
+    #[test]
+    fn test_struct_pattern_matching_simple() {
+        let test_content = r#"
+struct Point {
+    x: int,
+    y: int,
+}
+
+def get_x(p: Point) -> int {
+    match p {
+        Point { x: val, y: _ } => val,
+    }
+}
+
+let p = Point { x: 10, y: 20 };
+get_x(p)
+"#;
+
+        let test_file = "test_struct_pattern_simple.vi";
+        {
+            use std::fs::File;
+            use std::io::Write;
+
+            let mut file = File::create(test_file).unwrap();
+            file.write_all(test_content.as_bytes()).unwrap();
+        }
+
+        let output = Command::new("cargo")
+            .args(&["run", "--", test_file, "-e"])
+            .output()
+            .expect("Failed to execute command");
+
+        assert!(
+            output.status.success(),
+            "Simple struct pattern matching failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        // Verify the result is 10
+        let stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
+        assert!(stdout_str.contains("Int(10)") || stdout_str.contains("10"));
+
+        // Clean up
+        std::fs::remove_file(test_file).unwrap();
+    }
+
+    #[test]
+    fn test_struct_pattern_matching_conditional() {
+        let test_content = r#"
+struct Point {
+    x: int,
+    y: int,
+}
+
+def test_pattern(p: Point) -> int {
+    match p {
+        Point { x: 0, y: 0 } => 0,      // origin
+        Point { x: 0, y: y_val } => y_val,      // on y-axis
+        Point { x: x_val, y: 0 } => x_val,      // on x-axis
+        Point { x: x_val, y: y_val } => x_val + y_val,  // general case
+    }
+}
+
+let origin = Point { x: 0, y: 0 };
+let on_x = Point { x: 5, y: 0 };
+let on_y = Point { x: 0, y: 3 };
+
+test_pattern(origin) + test_pattern(on_x) + test_pattern(on_y)
+"#;
+
+        let test_file = "test_struct_pattern_conditional.vi";
+        {
+            use std::fs::File;
+            use std::io::Write;
+
+            let mut file = File::create(test_file).unwrap();
+            file.write_all(test_content.as_bytes()).unwrap();
+        }
+
+        let output = Command::new("cargo")
+            .args(&["run", "--", test_file, "-e"])
+            .output()
+            .expect("Failed to execute command");
+
+        assert!(
+            output.status.success(),
+            "Conditional struct pattern matching failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        // Verify the result is 0 + 5 + 3 = 8
+        let stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
+        assert!(stdout_str.contains("Int(8)") || stdout_str.contains("8"));
+
+        // Clean up
+        std::fs::remove_file(test_file).unwrap();
+    }
+
+    #[test]
+    fn test_nested_structs() {
+        let test_content = r#"
+struct Point {
+    x: int,
+    y: int,
+}
+
+struct Line {
+    start: Point,
+    end: Point,
+}
+
+let p1 = Point { x: 1, y: 2 };
+let p2 = Point { x: 3, y: 4 };
+let line = Line { start: p1, end: p2 };
+line.start.x + line.end.y
+"#;
+
+        let test_file = "test_nested_structs.vi";
+        {
+            use std::fs::File;
+            use std::io::Write;
+
+            let mut file = File::create(test_file).unwrap();
+            file.write_all(test_content.as_bytes()).unwrap();
+        }
+
+        let output = Command::new("cargo")
+            .args(&["run", "--", test_file, "-e"])
+            .output()
+            .expect("Failed to execute command");
+
+        assert!(
+            output.status.success(),
+            "Nested structs failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        // Verify the result is 1 + 4 = 5
+        let stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
+        assert!(stdout_str.contains("Int(5)") || stdout_str.contains("5"));
+
+        // Clean up
+        std::fs::remove_file(test_file).unwrap();
+    }
+
+    #[test]
+    fn test_nested_struct_pattern_matching() {
+        let test_content = r#"
+struct Point {
+    x: int,
+    y: int,
+}
+
+struct Line {
+    start: Point,
+    end: Point,
+}
+
+def get_start_x(line: Line) -> int {
+    match line {
+        Line { start: Point { x: x_val, y: _ }, end: _ } => x_val,
+    }
+}
+
+let line = Line { 
+    start: Point { x: 5, y: 10 }, 
+    end: Point { x: 15, y: 20 } 
+};
+get_start_x(line)
+"#;
+
+        let test_file = "test_nested_struct_pattern.vi";
+        {
+            use std::fs::File;
+            use std::io::Write;
+
+            let mut file = File::create(test_file).unwrap();
+            file.write_all(test_content.as_bytes()).unwrap();
+        }
+
+        let output = Command::new("cargo")
+            .args(&["run", "--", test_file, "-e"])
+            .output()
+            .expect("Failed to execute command");
+
+        assert!(
+            output.status.success(),
+            "Nested struct pattern matching failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        // Verify the result is 5
+        let stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
+        assert!(stdout_str.contains("Int(5)") || stdout_str.contains("5"));
 
         // Clean up
         std::fs::remove_file(test_file).unwrap();

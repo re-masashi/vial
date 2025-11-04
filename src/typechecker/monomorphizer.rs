@@ -1403,42 +1403,42 @@ impl Monomorphizer {
         concrete_type_keys: &[String],
     ) -> Rc<Type> {
         // Convert type keys back to types. For now, we'll use a simple approach.
-        // In a real implementation, we would need to look up the concrete types from their keys.
+        // Would need to look up the concrete types from their keys.
         let args: Vec<Rc<Type>> = concrete_type_keys
             .iter()
             .map(|key| {
                 // We'll need to resolve the type from the key
                 // This is a simplified approach - in practice you'd have a mapping from string keys to types
                 match key.as_str() {
-                    "Int" => Rc::new(Type {
+                    "int" => Rc::new(Type {
                         span: None,
                         file: None,
                         type_: TypeKind::Constructor {
-                            name: self.interner.intern("Int").0,
+                            name: self.interner.intern("int").0,
                             args: vec![],
                             kind: Kind::Star,
                         },
                     }),
-                    "Bool" => Rc::new(Type {
+                    "bool" => Rc::new(Type {
                         span: None,
                         file: None,
                         type_: TypeKind::Constructor {
-                            name: self.interner.intern("Bool").0,
+                            name: self.interner.intern("bool").0,
                             args: vec![],
                             kind: Kind::Star,
                         },
                     }),
-                    "String" => Rc::new(Type {
+                    "string" => Rc::new(Type {
                         span: None,
                         file: None,
                         type_: TypeKind::Constructor {
-                            name: self.interner.intern("String").0,
+                            name: self.interner.intern("string").0,
                             args: vec![],
                             kind: Kind::Star,
                         },
                     }),
                     t if t.contains("<") => {
-                        // Handle nested types like List<Int>
+                        // Handle nested types like List<int>
                         let parts: Vec<&str> = t.split('<').collect();
                         if parts.len() >= 2 {
                             let base_name = parts[0];

@@ -231,6 +231,10 @@ impl TargetInfo {
             let align = self.align_of(field_type, module)?;
 
             // Check if padding needed
+            // Handle the case where align is 0 (which indicates error in layout computation)
+            if align == 0 {
+                return None; // This indicates a circular dependency or unresolved type
+            }
             let aligned_offset = (offset + align - 1) & !(align - 1);
             if aligned_offset > offset {
                 padding_bytes.push(PaddingInfo {

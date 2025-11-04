@@ -2990,7 +2990,7 @@ fn test_non_polymorphic_function_detection() {
                     span: None,
                     file: None,
                     type_: TypeKind::Constructor {
-                        name: monomorphizer.interner.intern("Int").0,
+                        name: monomorphizer.interner.intern("int").0,
                         args: vec![],
                         kind: Kind::Star,
                     },
@@ -3005,7 +3005,7 @@ fn test_non_polymorphic_function_detection() {
                     span: None,
                     file: None,
                     type_: TypeKind::Constructor {
-                        name: monomorphizer.interner.intern("Int").0,
+                        name: monomorphizer.interner.intern("int").0,
                         args: vec![],
                         kind: Kind::Star,
                     },
@@ -3016,7 +3016,7 @@ fn test_non_polymorphic_function_detection() {
             span: None,
             file: None,
             type_: TypeKind::Constructor {
-                name: monomorphizer.interner.intern("Int").0,
+                name: monomorphizer.interner.intern("int").0,
                 args: vec![],
                 kind: Kind::Star,
             },
@@ -3032,7 +3032,7 @@ fn test_non_polymorphic_function_detection() {
                         span: None,
                         file: None,
                         type_: TypeKind::Constructor {
-                            name: monomorphizer.interner.intern("Int").0,
+                            name: monomorphizer.interner.intern("int").0,
                             args: vec![],
                             kind: Kind::Star,
                         },
@@ -3041,7 +3041,7 @@ fn test_non_polymorphic_function_detection() {
                         span: None,
                         file: None,
                         type_: TypeKind::Constructor {
-                            name: monomorphizer.interner.intern("Int").0,
+                            name: monomorphizer.interner.intern("int").0,
                             args: vec![],
                             kind: Kind::Star,
                         },
@@ -3051,7 +3051,7 @@ fn test_non_polymorphic_function_detection() {
                     span: None,
                     file: None,
                     type_: TypeKind::Constructor {
-                        name: monomorphizer.interner.intern("Int").0,
+                        name: monomorphizer.interner.intern("int").0,
                         args: vec![],
                         kind: Kind::Star,
                     },
@@ -3074,7 +3074,7 @@ fn test_non_polymorphic_function_detection() {
                         span: None,
                         file: None,
                         type_: TypeKind::Constructor {
-                            name: monomorphizer.interner.intern("Int").0,
+                            name: monomorphizer.interner.intern("int").0,
                             args: vec![],
                             kind: Kind::Star,
                         },
@@ -3092,7 +3092,7 @@ fn test_non_polymorphic_function_detection() {
                         span: None,
                         file: None,
                         type_: TypeKind::Constructor {
-                            name: monomorphizer.interner.intern("Int").0,
+                            name: monomorphizer.interner.intern("int").0,
                             args: vec![],
                             kind: Kind::Star,
                         },
@@ -3103,7 +3103,7 @@ fn test_non_polymorphic_function_detection() {
                 span: None,
                 file: None,
                 type_: TypeKind::Constructor {
-                    name: monomorphizer.interner.intern("Int").0,
+                    name: monomorphizer.interner.intern("int").0,
                     args: vec![],
                     kind: Kind::Star,
                 },
@@ -3125,23 +3125,23 @@ fn test_make_specialized_name_generation() {
 
     // Test basic specialization name generation
     let base_name = monomorphizer.interner.intern("id");
-    let concrete_types = vec!["Int".to_string()];
+    let concrete_types = vec!["int".to_string()];
     let specialized_name = monomorphizer.make_specialized_name(base_name, &concrete_types);
 
     let resolved_name = monomorphizer.interner.resolve(specialized_name);
     assert!(resolved_name.starts_with("id$"));
-    assert!(resolved_name.contains("Int"));
+    assert!(resolved_name.contains("int"));
 
     // Test complex specialization name generation
     let base_name2 = monomorphizer.interner.intern("map");
-    let concrete_types2 = vec!["List".to_string(), "Int".to_string(), "String".to_string()];
+    let concrete_types2 = vec!["List".to_string(), "int".to_string(), "string".to_string()];
     let specialized_name2 = monomorphizer.make_specialized_name(base_name2, &concrete_types2);
 
     let resolved_name2 = monomorphizer.interner.resolve(specialized_name2);
     assert!(resolved_name2.starts_with("map$"));
     assert!(resolved_name2.contains("List"));
-    assert!(resolved_name2.contains("Int"));
-    assert!(resolved_name2.contains("String"));
+    assert!(resolved_name2.contains("int"));
+    assert!(resolved_name2.contains("string"));
 }
 
 // Test for error_type function

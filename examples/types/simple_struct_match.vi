@@ -1,0 +1,14 @@
+// Simple test of struct pattern matching
+struct Point {
+    x: int,
+    y: int,
+}
+
+def get_x(p: Point) -> int {
+    match p {
+        Point { x: val, y: _ } => val,
+    }
+}
+
+let p = Point { x: 10, y: 20 };
+get_x(p)

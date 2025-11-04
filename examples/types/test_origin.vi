@@ -1,0 +1,17 @@
+// Test struct pattern matching - just the origin case
+struct Point {
+    x: int,
+    y: int,
+}
+
+def test_pattern(p: Point) -> int {
+    match p {
+        Point { x: 0, y: 0 } => 100,      // origin - should return this
+        Point { x: 0, y: y } => y,      // on y-axis
+        Point { x: x, y: 0 } => x,      // on x-axis
+        Point { x: x, y: y } => x + y,  // general case
+    }
+}
+
+let origin = Point { x: 0, y: 0 };
+test_pattern(origin)
