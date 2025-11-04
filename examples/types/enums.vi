@@ -1,0 +1,32 @@
+// Test custom enum with unit variants
+enum Color { Red, Green, Blue }
+
+let color = Color::Red;
+
+let color_value = match color {
+    Color::Red => 1,
+    Color::Green => 2,
+    Color::Blue => 3
+};
+
+// Test custom enum with value variants
+enum Maybe { Just(int), Nothing }
+
+let value = Maybe::Just(42);
+
+let result = match value {
+    Maybe::Just(n) => n * 2,
+    Maybe::Nothing => 0
+};
+
+// Test nested usage
+enum Result { Ok(int), Err(string) }
+
+let res = Result::Ok(result);
+
+let final_result = match res {
+    Result::Ok(val) => val + 10,
+    Result::Err(_) => -1
+};
+
+final_result

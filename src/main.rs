@@ -30,18 +30,17 @@ use vial::validation::{TypedValidator, UntypedValidator};
 ///
 /// ```no_run
 /// // From the workspace root:
-/// // cargo run -- path/to/file.ni        # compile and show guidance
-/// // cargo run -- -i path/to/file.ni     # compile and dump the IR
-/// // cargo run -- -e path/to/file.ni     # compile and execute the program (requires `main`)
+/// // cargo run -- path/to/file.vi
+/// // cargo run -- path/to/file.vi -i     # compile and dump the IR
+/// // cargo run -- path/to/file.vi  -e  # compile and execute the program
 /// ```
 fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
-        eprintln!("Usage: {} <file.ni>", args[0]);
+        eprintln!("Usage: {} <file.vi>", args[0]);
         eprintln!("\nExample files:");
-        eprintln!("  cargo run -- examples/basic.ni");
-        eprintln!("  cargo run -- examples/example.ni");
+        eprintln!("  cargo run -- examples/basic/hello_world.vi");
         std::process::exit(1);
     }
 

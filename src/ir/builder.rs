@@ -268,10 +268,50 @@ impl IRBuilder {
 
         let mut enum_keys: Vec<_> = self.enums.keys().cloned().collect();
         enum_keys.sort();
-        let enums: Vec<_> = enum_keys
+        let mut enums: Vec<_> = enum_keys
             .into_iter()
             .map(|id| self.enums[&id].clone())
             .collect();
+
+        // Compute memory layouts for all enums
+        for enum_data in &mut enums {
+            // Compute memory layout for the enum
+            // For enums, we need to determine discriminant size and overall layout
+            let max_discriminant = enum_data.variants.len().saturating_sub(1);
+
+            // Determine discriminant size based on number of variants
+            let discriminant_size = if max_discriminant <= u8::MAX as usize {
+                std::mem::size_of::<u8>()
+            } else if max_discriminant <= u16::MAX as usize {
+                std::mem::size_of::<u16>()
+            } else {
+                std::mem::size_of::<u32>()
+            };
+
+            // Set discriminant offset and size in the memory layout
+            let discriminant_offset = 0; // Discriminant comes first
+            let alignment = discriminant_size.max(1); // Basic alignment
+
+            // Calculate data offset for each variant (after discriminant)
+            // For simplicity, we'll use the same offset for all variants for now
+            for variant in &mut enum_data.variants {
+                variant.data_offset = discriminant_offset + discriminant_size; // Data comes after discriminant
+            }
+
+            // Total size - for now using a basic calculation
+            // In a more complete implementation we'd calculate based on actual variant sizes
+            let total_size = discriminant_size + 16; // 16 bytes as a basic allocation for data
+
+            enum_data.memory_layout = crate::ir::MemoryLayout {
+                size: total_size,
+                alignment,
+                field_offsets: Vec::new(), // Not used for enums in this system
+                discriminant_offset: Some(discriminant_offset),
+                discriminant_size: Some(discriminant_size),
+                discriminant_encoding: Some(crate::ir::DiscriminantEncoding::Explicit),
+                padding_bytes: Vec::new(),
+            };
+        }
 
         let mut effect_keys: Vec<_> = self.effects.keys().cloned().collect();
         effect_keys.sort();
@@ -499,7 +539,8 @@ impl IRBuilder {
         let variants: Vec<_> = e
             .variants
             .iter()
-            .map(|variant| {
+            .enumerate() // Add enumerate to assign discriminant values
+            .map(|(discriminant_idx, variant)| {
                 let _fields: Vec<_> = variant
                     .types
                     .iter()
@@ -524,8 +565,8 @@ impl IRBuilder {
                     constructor_type: self.convert_type(&variant.constructor_type),
                     span: variant.span.clone(),
                     file: variant.file.clone(),
-                    data_offset: 0,        // Will be computed later
-                    discriminant_value: 0, // Will be computed later
+                    data_offset: 0,                       // Will be computed later
+                    discriminant_value: discriminant_idx, // Assign the discriminant value based on index
                 }
             })
             .collect();
@@ -1582,8 +1623,8 @@ impl<'a> FunctionBuilder<'a> {
             return IRValue::SSA(result);
         }
 
-        // Lower each arm and collect results (only for enum matches)
-        let mut arm_results = Vec::new();
+        // Create SSA values for each arm in their respective blocks and collect results
+        let mut arm_ssa_results = Vec::new();
 
         for (i, arm) in arms.iter().enumerate() {
             self.set_current_block(arm_blocks[i]);
@@ -1600,55 +1641,51 @@ impl<'a> FunctionBuilder<'a> {
 
             // Lower the arm body
             let result = self.lower_expr(&arm.body);
-            let end_block = self.current_block;
+            let current_block = self.current_block;
 
-            arm_results.push((result, end_block));
+            // Make sure the result is in SSA form in the current block
+            let ssa_result = match result {
+                IRValue::SSA(id) => IRValue::SSA(id),
+                non_ssa_val => {
+                    // For non-SSA values, we need to create an SSA value in the current block
+                    let temp_id = self.builder.fresh_value_id();
+                    self.emit(IRInstruction::Let {
+                        result: temp_id,
+                        metadata: InstructionMetadata {
+                            memory_slot: None,
+                            allocation_site: None,
+                        },
+                        var: "_arm_result".to_string(),
+                        value: non_ssa_val,
+                        var_type: IRTypeWithMemory {
+                            type_: IRType::Int, // Placeholder - would be actual type in real implementation
+                            span: span.clone(),
+                            file: file.to_string(),
+                            memory_kind: MemoryKind::Stack,
+                            allocation_id: None,
+                        },
+                        span: span.clone(),
+                        file: file.to_string(),
+                    });
+                    IRValue::SSA(temp_id)
+                }
+            };
+
+            arm_ssa_results.push((ssa_result, current_block));
 
             // Jump to merge block
             self.emit_jump(merge_block, span, file);
 
             // Update CFG
-            self.add_cfg_edge(end_block, merge_block);
+            self.add_cfg_edge(current_block, merge_block);
         }
 
         // Create merge block with PHI node
         self.set_current_block(merge_block);
         let result = self.builder.fresh_value_id();
 
-        // In SSA form, PHI nodes should properly reference the SSA values that flow from predecessors.
-        // Convert IRValues to proper SSA values for the PHI node.
-        let ssa_arm_results: Vec<(IRValue, BasicBlockId)> = arm_results
-            .into_iter()
-            .map(|(arm_result, end_block)| {
-                let ssa_val = match arm_result {
-                    IRValue::SSA(id) => IRValue::SSA(id),
-                    _ => {
-                        // For non-SSA values, we need to create an SSA value that represents this value
-                        let temp_id = self.builder.fresh_value_id();
-                        self.emit(IRInstruction::Let {
-                            result: temp_id,
-                            metadata: InstructionMetadata {
-                                memory_slot: None,
-                                allocation_site: None,
-                            },
-                            var: "_phi_temp_arm".to_string(),
-                            value: arm_result,
-                            var_type: IRTypeWithMemory {
-                                type_: IRType::Int, // Placeholder - would be actual type in real implementation
-                                span: span.clone(),
-                                file: file.to_string(),
-                                memory_kind: MemoryKind::Stack,
-                                allocation_id: None,
-                            },
-                            span: span.clone(),
-                            file: file.to_string(),
-                        });
-                        IRValue::SSA(temp_id)
-                    }
-                };
-                (ssa_val, end_block)
-            })
-            .collect();
+        // Now all arm results are already in SSA form
+        let ssa_arm_results = arm_ssa_results;
 
         let phi = IRInstruction::Phi {
             result,

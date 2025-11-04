@@ -567,37 +567,39 @@ impl Interpreter {
                                     .locals
                                     .insert(*result, field_val);
                             }
-                            super::heap::HeapObject::Enum { data, .. } => {
-                                // Convert field to payload index (subtract 1 to account for discriminant)
-                                let payload_index = if field.0 > 0 {
-                                    field.0 - 1
-                                } else {
-                                    return Err(InterpreterError::TypeError {
-                                        expected: "valid enum payload field",
-                                        got: format!(
-                                            "field id: {:?} (invalid for enum payload)",
-                                            field
-                                        ),
-                                    });
-                                };
-
-                                if payload_index < data.len() {
-                                    let field_val = data[payload_index].clone();
+                            super::heap::HeapObject::Enum {
+                                variant_id, data, ..
+                            } => {
+                                if field.0 == 0 {
+                                    // Field 0 is the discriminant (variant_id)
+                                    let discriminant_val = Value::Int(variant_id.0 as i64);
                                     self.call_stack
                                         .current()
                                         .unwrap()
                                         .locals
-                                        .insert(*result, field_val);
+                                        .insert(*result, discriminant_val);
                                 } else {
-                                    return Err(InterpreterError::TypeError {
-                                        expected: "valid enum payload field",
-                                        got: format!(
-                                            "field id: {:?} (index {} >= {})",
-                                            field,
-                                            payload_index,
-                                            data.len()
-                                        ),
-                                    });
+                                    // Convert field to payload index (subtract 1 to account for discriminant)
+                                    let payload_index = field.0 - 1;
+
+                                    if payload_index < data.len() {
+                                        let field_val = data[payload_index].clone();
+                                        self.call_stack
+                                            .current()
+                                            .unwrap()
+                                            .locals
+                                            .insert(*result, field_val);
+                                    } else {
+                                        return Err(InterpreterError::TypeError {
+                                            expected: "valid enum payload field",
+                                            got: format!(
+                                                "field id: {:?} (index {} >= {})",
+                                                field,
+                                                payload_index,
+                                                data.len()
+                                            ),
+                                        });
+                                    }
                                 }
                             }
                             _ => {
@@ -704,35 +706,40 @@ impl Interpreter {
                             .locals
                             .insert(*result, field_val);
                     }
-                    super::heap::HeapObject::Enum { data, .. } => {
-                        // Convert field_id to payload index (subtract 1 because field_id 0 is the discriminant)
-                        // This follows the pattern in extract_enum_field where field_id = field_index + 1
-                        let payload_index = if field_id.0 > 0 {
-                            field_id.0 - 1
-                        } else {
-                            return Err(InterpreterError::TypeError {
-                                expected: "valid enum payload field",
-                                got: format!("field id: {:?} (invalid for enum payload)", field_id),
-                            });
-                        };
-
-                        if payload_index < data.len() {
-                            let field_val = data[payload_index].clone();
+                    super::heap::HeapObject::Enum {
+                        variant_id, data, ..
+                    } => {
+                        if field_id.0 == 0 {
+                            // Field 0 is the discriminant (variant_id)
+                            let discriminant_val = Value::Int(variant_id.0 as i64);
                             self.call_stack
                                 .current()
                                 .unwrap()
                                 .locals
-                                .insert(*result, field_val);
+                                .insert(*result, discriminant_val);
                         } else {
-                            return Err(InterpreterError::TypeError {
-                                expected: "valid enum payload field",
-                                got: format!(
-                                    "field id: {:?} (index {} >= {})",
-                                    field_id,
-                                    payload_index,
-                                    data.len()
-                                ),
-                            });
+                            // Convert field_id to payload index (subtract 1 because field_id 0 is the discriminant)
+                            // This follows the pattern in extract_enum_field where field_id = field_index + 1
+                            let payload_index = field_id.0 - 1;
+
+                            if payload_index < data.len() {
+                                let field_val = data[payload_index].clone();
+                                self.call_stack
+                                    .current()
+                                    .unwrap()
+                                    .locals
+                                    .insert(*result, field_val);
+                            } else {
+                                return Err(InterpreterError::TypeError {
+                                    expected: "valid enum payload field",
+                                    got: format!(
+                                        "field id: {:?} (index {} >= {})",
+                                        field_id,
+                                        payload_index,
+                                        data.len()
+                                    ),
+                                });
+                            }
                         }
                     }
                     _ => {

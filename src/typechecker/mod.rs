@@ -1264,11 +1264,25 @@ impl TypeChecker {
                 ASTNodeKind::Enum(e) => {
                     let enum_id = self.id_gen.fresh_enum();
                     let name = self.interner.intern(&e.name);
+
+                    // Pre-populate variants in the first pass so their names and arities are available when enum constructors are processed
+                    let mut variants = HashMap::new();
+                    for variant in &e.variants {
+                        let variant_sym = self.interner.intern(&variant.name);
+                        let variant_id = self.id_gen.fresh_variant();
+                        // Create placeholder types for the correct arity based on the untyped AST, but without full type checking
+                        // This preserves the correct argument count for proper arity checking later
+                        let placeholder_types = (0..variant.types.len())
+                            .map(|_| self.fresh_type_var())
+                            .collect();
+                        variants.insert(variant_sym, (variant_id, placeholder_types));
+                    }
+
                     let enum_info = EnumInfo {
                         id: enum_id,
                         name,
                         type_params: vec![],
-                        variants: HashMap::new(),
+                        variants,
                     };
                     self.env.enums.insert(enum_id, enum_info);
                 }
