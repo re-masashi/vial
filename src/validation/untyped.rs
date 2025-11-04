@@ -36,7 +36,7 @@ impl UntypedValidator {
     fn builtin_macros() -> HashMap<String, MacroDef> {
         let mut macros = HashMap::new();
 
-        let builtin_names = ["println", "print", "typeof", "input"];
+        let builtin_names = ["println", "print", "typeof", "input", "push"];
 
         for name in builtin_names.iter() {
             let macro_def = MacroDef {
@@ -53,7 +53,7 @@ impl UntypedValidator {
     }
 
     fn is_builtin_macro(&self, name: &str) -> bool {
-        matches!(name, "println" | "print" | "typeof" | "input")
+        matches!(name, "println" | "print" | "typeof" | "input" | "push")
     }
 
     pub fn validate(&mut self, nodes: Vec<ASTNode>, current_file: &Path) -> Vec<ASTNode> {

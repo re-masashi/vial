@@ -1,0 +1,16 @@
+// Test push! macro
+def test_push_macro() {
+    let arr = [1, 2, 3];
+    push!(arr, 4);
+    push!(arr, 5);
+}
+
+// Test Array Concatenation with +
+def test_array_concat() {
+    let arr1 = [10, 20];
+    let arr2 = [30, 40, 50];
+    let result = arr1 + arr2;
+}
+
+test_push_macro();
+test_array_concat();

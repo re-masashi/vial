@@ -3871,6 +3871,56 @@ impl TypeChecker {
                             type_: self.string_type(), // input! returns a string
                         }
                     }
+                    "push" => {
+                        // push! takes two arguments: an array and a value to push
+                        if args.len() != 2 {
+                            self.diagnostics.add_type_error(TypeError {
+                                span: expr.span.clone(),
+                                file: expr.file.clone(),
+                                kind: TypeErrorKind::ArityMismatch {
+                                    expected: 2,
+                                    found: args.len(),
+                                    function: name_sym,
+                                },
+                            });
+                            return self.error_expr(expr);
+                        }
+
+                        // Type check both arguments
+                        let typed_array = self.check_expr(&args[0]);
+                        let typed_value = self.check_expr(&args[1]);
+
+                        // The first argument should be an array type
+                        let array_element_type = self.fresh_type_var();
+                        let array_type = self.array_type(array_element_type.clone());
+                        self.unify(
+                            &typed_array.type_,
+                            &array_type,
+                            &args[0].span,
+                            &args[0].file,
+                        );
+
+                        // The value should match the array's element type
+                        self.unify(
+                            &typed_value.type_,
+                            &array_element_type,
+                            &args[1].span,
+                            &args[1].file,
+                        );
+
+                        // push! returns unit (side effect of modifying the array)
+                        TypedExpr {
+                            span: expr.span.clone(),
+                            file: expr.file.clone(),
+                            expr: TypedExprKind::MacroCall {
+                                name: name_sym,
+                                macro_id: MacroId(0),
+                                args: vec![typed_array, typed_value],
+                                delimiter: delimiter.clone(),
+                            },
+                            type_: self.unit_type(), // push! returns unit
+                        }
+                    }
                     _ => {
                         // For non-builtin macros, type check the arguments and return a fresh type variable
                         let typed_args: Vec<_> = args.iter().map(|a| self.check_expr(a)).collect();

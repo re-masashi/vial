@@ -1,8 +1,9 @@
 use std::collections::HashMap;
+use std::io;
 
 use super::builtins::execute_builtin;
 use super::error::InterpreterError;
-use super::heap::Heap;
+use super::heap::{Heap, HeapObject};
 use super::stack::CallStack;
 use super::value::{HeapPtr, Value};
 use crate::ast::{BinOp, UnOp};
@@ -52,6 +53,74 @@ impl Interpreter {
             heap: Heap::new(),
             globals: HashMap::new(),
         }
+    }
+
+    /// Print values with heap access for better formatting of complex objects like arrays
+    fn print_values(&self, args: &[Value]) -> Result<(), InterpreterError> {
+        for (i, arg) in args.iter().enumerate() {
+            if i > 0 {
+                print!(" "); // Add space between arguments like regular print
+            }
+
+            match arg {
+                Value::Int(i) => print!("{}", i),
+                Value::Float(f) => print!("{}", f),
+                Value::Bool(b) => print!("{}", b),
+                Value::String(s) => print!("{}", s),
+                Value::Ptr(ptr) => {
+                    // Try to print array contents if it's an array
+                    match self.heap.get(*ptr) {
+                        Ok(heap_obj) => match heap_obj {
+                            HeapObject::Array { elements } => {
+                                print!("[");
+                                for (j, elem) in elements.iter().enumerate() {
+                                    if j > 0 {
+                                        print!(", ");
+                                    }
+                                    self.print_single_value(elem)?;
+                                }
+                                print!("]");
+                            }
+                            _ => print!("<ptr>"),
+                        },
+                        Err(_) => print!("<invalid-ptr>"),
+                    }
+                }
+                Value::Null => print!("null"),
+            }
+        }
+        Ok(())
+    }
+
+    /// Helper function to print a single value, handling nested structures recursively
+    fn print_single_value(&self, value: &Value) -> Result<(), InterpreterError> {
+        match value {
+            Value::Int(i) => print!("{}", i),
+            Value::Float(f) => print!("{}", f),
+            Value::Bool(b) => print!("{}", b),
+            Value::String(s) => print!("{}", s),
+            Value::Ptr(ptr) => {
+                // Handle nested arrays
+                match self.heap.get(*ptr) {
+                    Ok(heap_obj) => match heap_obj {
+                        HeapObject::Array { elements } => {
+                            print!("[");
+                            for (i, elem) in elements.iter().enumerate() {
+                                if i > 0 {
+                                    print!(", ");
+                                }
+                                self.print_single_value(elem)?;
+                            }
+                            print!("]");
+                        }
+                        _ => print!("<ptr>"), // For non-array heap objects
+                    },
+                    Err(_) => print!("<invalid-ptr>"),
+                }
+            }
+            Value::Null => print!("null"),
+        }
+        Ok(())
     }
 
     // Main entry point
@@ -281,7 +350,27 @@ impl Interpreter {
                 let l = self.eval_value(left)?;
                 let r = self.eval_value(right)?;
                 let res = match op {
-                    BinOp::Add => l.add(&r)?,
+                    BinOp::Add => {
+                        // Check if both operands are arrays, if so concatenate them
+                        if let (Value::Ptr(ptr1), Value::Ptr(ptr2)) = (&l, &r) {
+                            match (self.heap.get(*ptr1)?, self.heap.get(*ptr2)?) {
+                                (
+                                    HeapObject::Array { elements: elems1 },
+                                    HeapObject::Array { elements: elems2 },
+                                ) => {
+                                    // Create a new array with concatenated elements
+                                    let mut new_elements = elems1.clone();
+                                    new_elements.extend(elems2.clone());
+                                    Value::Ptr(self.heap.allocate(HeapObject::Array {
+                                        elements: new_elements,
+                                    }))
+                                }
+                                _ => l.add(&r)?, // Fall back to regular addition for other types
+                            }
+                        } else {
+                            l.add(&r)? // Regular addition for non-pointer types
+                        }
+                    }
                     BinOp::Sub => l.sub(&r)?,
                     BinOp::Mul => l.mul(&r)?,
                     BinOp::Div => l.div(&r)?,
@@ -508,7 +597,62 @@ impl Interpreter {
                     args.iter().map(|a| self.eval_value(a)).collect();
                 let arg_values = arg_values?;
 
-                let ret = execute_builtin(builtin_name, arg_values)?;
+                let ret = match builtin_name.as_str() {
+                    "push" => {
+                        if arg_values.len() != 2 {
+                            return Err(InterpreterError::TypeError {
+                                expected: "two arguments (array and value)",
+                                got: format!("{} arguments", arg_values.len()),
+                            });
+                        }
+
+                        // First argument should be a pointer to an array
+                        let array_ptr = arg_values[0].as_ptr()?;
+                        let value_to_push = arg_values[1].clone();
+
+                        // Get the array from the heap and modify it
+                        let heap_obj = self.heap.get_mut(array_ptr).map_err(|_| {
+                            InterpreterError::TypeError {
+                                expected: "valid array pointer",
+                                got: "invalid pointer".to_string(),
+                            }
+                        })?;
+
+                        match heap_obj {
+                            super::heap::HeapObject::Array { elements } => {
+                                // Push the value to the array
+                                elements.push(value_to_push);
+                                Value::Null // push! returns unit
+                            }
+                            _ => {
+                                return Err(InterpreterError::TypeError {
+                                    expected: "array object",
+                                    got: "non-array object".to_string(),
+                                });
+                            }
+                        }
+                    }
+                    "print" | "println" => {
+                        // Handle print/println with heap access for better array formatting
+                        self.print_values(&arg_values)?;
+                        if builtin_name == "println" {
+                            println!();
+                        }
+                        Value::Null
+                    }
+                    "input" => {
+                        // Handle input builtin
+                        self.print_values(&arg_values)?; // Print prompt if any
+                        std::io::Write::flush(&mut std::io::stdout())
+                            .map_err(InterpreterError::IOError)?;
+                        let mut buffer = String::new();
+                        io::stdin()
+                            .read_line(&mut buffer)
+                            .map_err(InterpreterError::IOError)?;
+                        Value::String(buffer.trim().to_string())
+                    }
+                    _ => execute_builtin(builtin_name, arg_values)?,
+                };
 
                 self.call_stack
                     .current()

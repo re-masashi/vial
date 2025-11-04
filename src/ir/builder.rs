@@ -1528,6 +1528,11 @@ impl<'a> FunctionBuilder<'a> {
                         // Convert input! macro to input function call
                         self.lower_builtin_macro_call("input", args, &expr.span, &expr.file)
                     }
+                    "push" => {
+                        // Convert push! macro to a function call that adds an element to an array
+                        // This will be handled by the interpreter
+                        self.lower_builtin_macro_call("push", args, &expr.span, &expr.file)
+                    }
                     _ => {
                         // For other macros, this shouldn't happen if the type checker worked properly
                         // But just in case, we'll make a best effort to handle it
