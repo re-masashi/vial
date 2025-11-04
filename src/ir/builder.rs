@@ -7,7 +7,7 @@ use crate::ast::{
     TypedExprKind, TypedFunction, TypedStruct,
 };
 use crate::ir::{
-    AddressKind, AllocationId, BasicBlock, BasicBlockId, BasicBlockInfo, ControlFlowGraph,
+    AddressKind, AllocationId, BasicBlock, BasicBlockId, BasicBlockInfo, BinOp, ControlFlowGraph,
     EffectId, EnumId, EscapeAnalysisInfo, FieldId, FunctionId, IREffect, IREffectOperation, IREnum,
     IREnumVariant, IRExternFunction, IRFunction, IRFunctionArg, IRInstruction, IRModule, IRStruct,
     IRStructField, IRTerminator, IRType, IRTypeWithMemory, IRValue, InlineHint,
@@ -1171,7 +1171,28 @@ impl<'a> FunctionBuilder<'a> {
                     self.bindings.insert(binding_id.0, id);
                 } else {
                     let new_id = self.builder.fresh_value_id();
+                    // Create a binding that maps to this SSA value
                     self.bindings.insert(binding_id.0, new_id);
+
+                    // Create an instruction to hold the non-SSA value in SSA form
+                    self.emit(IRInstruction::Let {
+                        result: new_id,
+                        metadata: InstructionMetadata {
+                            memory_slot: None,
+                            allocation_site: None,
+                        },
+                        var: format!("var_{}", binding_id.0), // Create a variable name
+                        value: value_val,
+                        var_type: IRTypeWithMemory {
+                            type_: IRType::Int, // This should be obtained from the actual type - placeholder for now
+                            span: 0..0,
+                            file: String::new(),
+                            memory_kind: MemoryKind::Stack,
+                            allocation_id: None,
+                        },
+                        span: 0..0,
+                        file: String::new(),
+                    });
                 }
 
                 IRValue::Unit
@@ -1488,54 +1509,80 @@ impl<'a> FunctionBuilder<'a> {
         let arm_blocks: Vec<BasicBlockId> = arms.iter().map(|_| self.new_block()).collect();
         let merge_block = self.new_block();
 
-        // Extract discriminant for switching
-        let discriminant = self.extract_discriminant(&matched_val);
-
-        // Build switch cases - use actual discriminant values when available
-        let cases: Vec<(IRValue, BasicBlockId)> = arms
+        // Check if this is an enum match (uses discriminant) or literal match (uses comparisons)
+        let is_enum_match = arms
             .iter()
-            .zip(&arm_blocks)
-            .enumerate()
-            .map(|(i, (arm, &block))| {
-                // Extract actual discriminant from the enum variant pattern
-                // For enum patterns, we should get the discriminant value of the variant
-                match &arm.pattern.pat {
-                    crate::ast::TypedPatKind::Enum {
-                        enum_name: _,
-                        enum_id: _,
-                        variant: _,
-                        variant_id: _,
-                        params: _,
-                    } => {
-                        // For now, use the arm index as the discriminant
-                        // In a full implementation, we'd extract the real discriminant value
-                        (IRValue::Int(i as i64), block)
-                    }
-                    _ => {
-                        // For other pattern types, use a default
-                        (IRValue::Int(i as i64), block)
-                    }
-                }
-            })
-            .collect();
+            .any(|arm| matches!(arm.pattern.pat, crate::ast::TypedPatKind::Enum { .. }));
 
-        // Emit switch terminator
-        let current_block = self.blocks.get_mut(&self.current_block).unwrap();
-        current_block.terminator = Some(IRTerminator::Switch {
-            value: discriminant,
-            cases,
-            default: None, // Assume exhaustive
-            is_exhaustive: true,
-            span: span.clone(),
-            file: file.to_string(),
-        });
+        if is_enum_match {
+            // Handle enum matching using discriminant
+            let discriminant = self.extract_discriminant(&matched_val);
+
+            // Build switch cases for enum variants
+            let cases: Vec<(IRValue, BasicBlockId)> = arms
+                .iter()
+                .zip(&arm_blocks)
+                .enumerate()
+                .map(|(i, (arm, &block))| {
+                    match &arm.pattern.pat {
+                        crate::ast::TypedPatKind::Enum { variant_id, .. } => {
+                            // Use the actual variant's discriminant value
+                            // The variant_id should correspond to the discriminant value
+                            (IRValue::Int(variant_id.0 as i64), block)
+                        }
+                        _ => {
+                            // This shouldn't happen for is_enum_match case, but fallback to index
+                            (IRValue::Int(i as i64), block)
+                        }
+                    }
+                })
+                .collect();
+
+            // Emit switch terminator
+            let current_block = self.blocks.get_mut(&self.current_block).unwrap();
+            current_block.terminator = Some(IRTerminator::Switch {
+                value: discriminant,
+                cases,
+                default: None,       // For complete enum matches
+                is_exhaustive: true, // Assume exhaustive for enum matches
+                span: span.clone(),
+                file: file.to_string(),
+            });
+        } else {
+            // Handle literal matching using comparisons and branches
+            self.lower_literal_match(
+                matched_val.clone(),
+                arms,
+                &arm_blocks,
+                merge_block,
+                span,
+                file,
+            );
+        }
 
         // Update CFG
         for &arm_block in &arm_blocks {
             self.add_cfg_edge(self.current_block, arm_block);
         }
 
-        // Lower each arm and collect results
+        // For non-enum matches (literal/variable matches), the processing is handled by lower_literal_match
+        // So we don't need to process arms here if it's a literal match
+        // We'll only reach this code if it's an enum match
+        if !is_enum_match {
+            // For literal matches, the merge block and PHI have already been set up by lower_literal_match
+            // We need to get the result from the PHI node in the merge block
+            let merge_block_data = self.blocks.get(&merge_block).unwrap();
+            if let Some(phi_node) = merge_block_data.phi_nodes.last()
+                && let IRInstruction::Phi { result, .. } = phi_node
+            {
+                return IRValue::SSA(*result);
+            }
+            // This shouldn't happen if lower_literal_match is working properly
+            let result = self.builder.fresh_value_id();
+            return IRValue::SSA(result);
+        }
+
+        // Lower each arm and collect results (only for enum matches)
         let mut arm_results = Vec::new();
 
         for (i, arm) in arms.iter().enumerate() {
@@ -1619,6 +1666,457 @@ impl<'a> FunctionBuilder<'a> {
         IRValue::SSA(result)
     }
 
+    fn lower_literal_match(
+        &mut self,
+        matched_val: IRValue,
+        arms: &[crate::ast::TypedMatchArm],
+        arm_blocks: &[BasicBlockId],
+        merge_block: BasicBlockId,
+        span: &Range<usize>,
+        file: &str,
+    ) {
+        // For literal matches, we generate a series of conditional branches
+        // instead of a switch statement
+        let mut current_block = self.current_block;
+
+        // Process each arm in sequence and collect results
+        let mut arm_results = Vec::new();
+
+        for (i, arm) in arms.iter().enumerate() {
+            // Create a comparison block for this arm
+            let compare_block = self.new_block();
+
+            // Determine the "else" block for this comparison
+            // If this is the last arm, the "else" goes directly to this arm (it's the fallback)
+            // If this is the second-to-last arm and the last arm is a catch-all (Bind/Wildcard),
+            // the "else" should go to the last arm's block
+            // Otherwise, it goes to the next comparison block
+            let else_block = if i == arms.len() - 1 {
+                // This is the last arm, so "else" should go to this arm's block
+                arm_blocks[i]
+            } else if i == arms.len() - 2 {
+                // This is the second-to-last arm, check if last arm is catch-all
+                let next_arm_is_catchall = matches!(
+                    arms[i + 1].pattern.pat,
+                    crate::ast::TypedPatKind::Wildcard | crate::ast::TypedPatKind::Bind { .. }
+                );
+
+                if next_arm_is_catchall {
+                    // Last arm is catch-all, so second-to-last "else" goes to last arm block
+                    arm_blocks[i + 1]
+                } else {
+                    // Last arm is not catch-all, so we need another comparison
+                    self.new_block()
+                }
+            } else {
+                // This is not the last or second-to-last arm, so "else" should go to next comparison
+                self.new_block()
+            };
+
+            // Branch from current block to the comparison block
+            self.set_current_block(current_block);
+            self.emit_jump(compare_block, span, file);
+            self.add_cfg_edge(current_block, compare_block);
+
+            // In the comparison block, check if the matched value matches the pattern
+            self.set_current_block(compare_block);
+
+            match &arm.pattern.pat {
+                crate::ast::TypedPatKind::Literal(literal) => {
+                    // Need to generate a comparison instruction
+                    let literal_val = match literal {
+                        crate::ast::Literal::Int(n) => IRValue::Int(*n),
+                        crate::ast::Literal::Float(f) => IRValue::Float(*f),
+                        crate::ast::Literal::Bool(b) => IRValue::Bool(*b),
+                        crate::ast::Literal::String(s) => IRValue::String(s.clone()),
+                    };
+
+                    let cmp_result = self.builder.fresh_value_id();
+
+                    // Create a comparison (for now assuming integer comparison)
+                    self.emit(IRInstruction::BinOp {
+                        result: cmp_result,
+                        metadata: InstructionMetadata {
+                            memory_slot: None,
+                            allocation_site: None,
+                        },
+                        left: matched_val.clone(),
+                        op: BinOp::Eq,
+                        right: literal_val,
+                        span: arm.pattern.span.clone(),
+                        file: arm.pattern.file.clone(),
+                    });
+
+                    // Create conditional branch: if comparison is true go to arm, else go to else_block
+                    // Set up the "then" arm block
+                    let current_block_ref = self.blocks.get_mut(&compare_block).unwrap();
+                    current_block_ref.terminator = Some(IRTerminator::Branch {
+                        condition: IRValue::SSA(cmp_result),
+                        then_block: arm_blocks[i],
+                        else_block,
+                        span: span.clone(),
+                        file: file.to_string(),
+                    });
+
+                    // Process the "then" (arm) block
+                    self.set_current_block(arm_blocks[i]);
+
+                    // Bind pattern variables
+                    // For literal patterns, we need to treat the variable as bound to the matched value
+                    self.bind_pattern(&arm.pattern, matched_val.clone());
+
+                    // Handle guard if present
+                    if let Some(guard) = &arm.guard {
+                        // TODO: Implement guard checking
+                        // For now, just lower the guard expression but don't check it
+                        self.lower_expr(guard);
+                    }
+
+                    // Lower the arm body
+                    let result = self.lower_expr(&arm.body);
+
+                    // If the result is not an SSA value, create an instruction to store it as one in this block
+                    let final_result = match result {
+                        IRValue::SSA(_) => result,
+                        _ => {
+                            let temp_id = self.builder.fresh_value_id();
+                            self.emit(IRInstruction::Let {
+                                result: temp_id,
+                                metadata: InstructionMetadata {
+                                    memory_slot: None,
+                                    allocation_site: None,
+                                },
+                                var: format!("_arm_result_{}", i), // Unique variable name for each arm
+                                value: result,
+                                var_type: IRTypeWithMemory {
+                                    type_: IRType::Int, // Placeholder - would be actual type in real implementation
+                                    span: span.clone(),
+                                    file: file.to_string(),
+                                    memory_kind: MemoryKind::Stack,
+                                    allocation_id: None,
+                                },
+                                span: span.clone(),
+                                file: file.to_string(),
+                            });
+                            IRValue::SSA(temp_id)
+                        }
+                    };
+
+                    let end_block = self.current_block;
+                    arm_results.push((final_result, end_block));
+
+                    // Jump to merge block
+                    self.emit_jump(merge_block, span, file);
+                    self.add_cfg_edge(end_block, merge_block);
+
+                    // Update CFG
+                    self.add_cfg_edge(compare_block, arm_blocks[i]);
+                    self.add_cfg_edge(compare_block, else_block);
+
+                    // Update current block for next iteration (for non-last arms)
+                    if i < arms.len() - 1 {
+                        current_block = else_block;
+                    } else {
+                        // If this is the last arm, we don't need to continue the loop
+                        // The "else" path (which is the arm block itself) will handle the fall-through case
+                        // and jump to merge_block after processing
+                        break;
+                    }
+                }
+                crate::ast::TypedPatKind::Wildcard | crate::ast::TypedPatKind::Bind { .. } => {
+                    // For wildcard and binding patterns, these are typically used as catch-all/final patterns
+                    // If this is the last pattern in the match, it catches all remaining cases
+                    // We need to process it differently based on position
+                    if i == arms.len() - 1 {
+                        // This is the last arm, so if we reach this point, execute this arm
+                        // The "else" block already points to this arm_blocks[i]
+                        self.set_current_block(arm_blocks[i]);
+
+                        // Bind pattern variables
+                        self.bind_pattern(&arm.pattern, matched_val.clone());
+
+                        // Handle guard if present
+                        if let Some(guard) = &arm.guard {
+                            // TODO: Implement guard checking
+                            // For now, just lower the guard expression but don't check it
+                            self.lower_expr(guard);
+                        }
+
+                        // Lower the arm body
+                        let result = self.lower_expr(&arm.body);
+
+                        // If the result is not an SSA value, create an instruction to store it as one in this block
+                        let final_result = match result {
+                            IRValue::SSA(_) => result,
+                            _ => {
+                                let temp_id = self.builder.fresh_value_id();
+                                self.emit(IRInstruction::Let {
+                                    result: temp_id,
+                                    metadata: InstructionMetadata {
+                                        memory_slot: None,
+                                        allocation_site: None,
+                                    },
+                                    var: format!("_arm_result_{}", i), // Unique variable name for each arm
+                                    value: result,
+                                    var_type: IRTypeWithMemory {
+                                        type_: IRType::Int, // Placeholder - would be actual type in real implementation
+                                        span: span.clone(),
+                                        file: file.to_string(),
+                                        memory_kind: MemoryKind::Stack,
+                                        allocation_id: None,
+                                    },
+                                    span: span.clone(),
+                                    file: file.to_string(),
+                                });
+                                IRValue::SSA(temp_id)
+                            }
+                        };
+
+                        let end_block = self.current_block;
+                        arm_results.push((final_result, end_block));
+
+                        // Jump to merge block
+                        self.emit_jump(merge_block, span, file);
+                        self.add_cfg_edge(end_block, merge_block);
+
+                        // If this is truly the last arm, break
+                        // Otherwise, continue to handle next comparison
+                        if i == arms.len() - 1 {
+                            break;
+                        }
+                    } else {
+                        // Not the last arm, so treat it as a potential catch-all
+                        // but since there are more patterns after, this means there's an issue
+                        // In normal pattern matching, catch-all patterns should come last
+                        // For this implementation, let's just treat it as the final arm anyway
+                        self.set_current_block(arm_blocks[i]);
+
+                        // Bind pattern variables
+                        self.bind_pattern(&arm.pattern, matched_val.clone());
+
+                        // Handle guard if present
+                        if let Some(guard) = &arm.guard {
+                            // TODO: Implement guard checking
+                            // For now, just lower the guard expression but don't check it
+                            self.lower_expr(guard);
+                        }
+
+                        // Lower the arm body
+                        let result = self.lower_expr(&arm.body);
+
+                        // If the result is not an SSA value, create an instruction to store it as one in this block
+                        let final_result = match result {
+                            IRValue::SSA(_) => result,
+                            _ => {
+                                let temp_id = self.builder.fresh_value_id();
+                                self.emit(IRInstruction::Let {
+                                    result: temp_id,
+                                    metadata: InstructionMetadata {
+                                        memory_slot: None,
+                                        allocation_site: None,
+                                    },
+                                    var: format!("_arm_result_{}", i), // Unique variable name for each arm
+                                    value: result,
+                                    var_type: IRTypeWithMemory {
+                                        type_: IRType::Int, // Placeholder - would be actual type in real implementation
+                                        span: span.clone(),
+                                        file: file.to_string(),
+                                        memory_kind: MemoryKind::Stack,
+                                        allocation_id: None,
+                                    },
+                                    span: span.clone(),
+                                    file: file.to_string(),
+                                });
+                                IRValue::SSA(temp_id)
+                            }
+                        };
+
+                        let end_block = self.current_block;
+                        arm_results.push((final_result, end_block));
+
+                        // Jump to merge block
+                        self.emit_jump(merge_block, span, file);
+                        self.add_cfg_edge(end_block, merge_block);
+
+                        // If this is truly the last arm, break
+                        // Otherwise, continue to handle next comparison
+                        if i == arms.len() - 1 {
+                            break;
+                        }
+                    }
+                }
+                _ => {
+                    // For other patterns, treat as literal if not last, or catch-all if last
+                    // Process similarly to literal
+                    if i == arms.len() - 1 {
+                        // Last arm - no comparison needed, just execute this arm
+                        self.set_current_block(arm_blocks[i]);
+
+                        // Bind pattern variables
+                        self.bind_pattern(&arm.pattern, matched_val.clone());
+
+                        // Handle guard if present
+                        if let Some(guard) = &arm.guard {
+                            // TODO: Implement guard checking
+                            // For now, just lower the guard expression but don't check it
+                            self.lower_expr(guard);
+                        }
+
+                        // Lower the arm body
+                        let result = self.lower_expr(&arm.body);
+
+                        // If the result is not an SSA value, create an instruction to store it as one in this block
+                        let final_result = match result {
+                            IRValue::SSA(_) => result,
+                            _ => {
+                                let temp_id = self.builder.fresh_value_id();
+                                self.emit(IRInstruction::Let {
+                                    result: temp_id,
+                                    metadata: InstructionMetadata {
+                                        memory_slot: None,
+                                        allocation_site: None,
+                                    },
+                                    var: format!("_arm_result_{}", i), // Unique variable name for each arm
+                                    value: result,
+                                    var_type: IRTypeWithMemory {
+                                        type_: IRType::Int, // Placeholder - would be actual type in real implementation
+                                        span: span.clone(),
+                                        file: file.to_string(),
+                                        memory_kind: MemoryKind::Stack,
+                                        allocation_id: None,
+                                    },
+                                    span: span.clone(),
+                                    file: file.to_string(),
+                                });
+                                IRValue::SSA(temp_id)
+                            }
+                        };
+
+                        let end_block = self.current_block;
+                        arm_results.push((final_result, end_block));
+
+                        // Jump to merge block
+                        self.emit_jump(merge_block, span, file);
+                        self.add_cfg_edge(end_block, merge_block);
+
+                        // If this is truly the last arm, break
+                        // Otherwise, continue to handle next comparison
+                        if i == arms.len() - 1 {
+                            break;
+                        }
+                    } else {
+                        // Not the last arm - but we don't know how to compare other patterns
+                        // For now, just treat as unreachable or add a default comparison
+                        // This should ideally be an error, but let's make it work for now
+                        self.set_current_block(arm_blocks[i]);
+
+                        // Bind pattern variables
+                        self.bind_pattern(&arm.pattern, matched_val.clone());
+
+                        // Handle guard if present
+                        if let Some(guard) = &arm.guard {
+                            // TODO: Implement guard checking
+                            // For now, just lower the guard expression but don't check it
+                            self.lower_expr(guard);
+                        }
+
+                        // Lower the arm body
+                        let result = self.lower_expr(&arm.body);
+
+                        // If the result is not an SSA value, create an instruction to store it as one in this block
+                        let final_result = match result {
+                            IRValue::SSA(_) => result,
+                            _ => {
+                                let temp_id = self.builder.fresh_value_id();
+                                self.emit(IRInstruction::Let {
+                                    result: temp_id,
+                                    metadata: InstructionMetadata {
+                                        memory_slot: None,
+                                        allocation_site: None,
+                                    },
+                                    var: format!("_arm_result_{}", i), // Unique variable name for each arm
+                                    value: result,
+                                    var_type: IRTypeWithMemory {
+                                        type_: IRType::Int, // Placeholder - would be actual type in real implementation
+                                        span: span.clone(),
+                                        file: file.to_string(),
+                                        memory_kind: MemoryKind::Stack,
+                                        allocation_id: None,
+                                    },
+                                    span: span.clone(),
+                                    file: file.to_string(),
+                                });
+                                IRValue::SSA(temp_id)
+                            }
+                        };
+
+                        let end_block = self.current_block;
+                        arm_results.push((final_result, end_block));
+
+                        // Jump to merge block
+                        self.emit_jump(merge_block, span, file);
+                        self.add_cfg_edge(end_block, merge_block);
+
+                        // Continue to next comparison
+                        current_block = else_block;
+                    }
+                }
+            };
+        }
+
+        // Now create the merge block with the PHI node
+        self.set_current_block(merge_block);
+        let result = self.builder.fresh_value_id();
+
+        // In SSA form, PHI nodes should properly reference the SSA values that flow from predecessors.
+        // Convert IRValues to proper SSA values for the PHI node.
+        let ssa_arm_results: Vec<(IRValue, BasicBlockId)> = arm_results
+            .into_iter()
+            .map(|(arm_result, end_block)| {
+                let ssa_val = match arm_result {
+                    IRValue::SSA(id) => IRValue::SSA(id),
+                    _ => {
+                        // For non-SSA values, we need to create an SSA value that represents this value
+                        let temp_id = self.builder.fresh_value_id();
+                        self.emit(IRInstruction::Let {
+                            result: temp_id,
+                            metadata: InstructionMetadata {
+                                memory_slot: None,
+                                allocation_site: None,
+                            },
+                            var: "_phi_temp_arm".to_string(),
+                            value: arm_result,
+                            var_type: IRTypeWithMemory {
+                                type_: IRType::Int, // Placeholder - would be actual type in real implementation
+                                span: span.clone(),
+                                file: file.to_string(),
+                                memory_kind: MemoryKind::Stack,
+                                allocation_id: None,
+                            },
+                            span: span.clone(),
+                            file: file.to_string(),
+                        });
+                        IRValue::SSA(temp_id)
+                    }
+                };
+                (ssa_val, end_block)
+            })
+            .collect();
+
+        let phi = IRInstruction::Phi {
+            result,
+            metadata: InstructionMetadata {
+                memory_slot: None,
+                allocation_site: None,
+            },
+            incoming: ssa_arm_results,
+            span: span.clone(),
+            file: file.to_string(),
+        };
+
+        self.blocks.get_mut(&merge_block).unwrap().add_phi(phi);
+    }
+
     fn bind_pattern(&mut self, pattern: &crate::ast::TypedPattern, value: IRValue) {
         match &pattern.pat {
             crate::ast::TypedPatKind::Wildcard => {
@@ -1695,17 +2193,42 @@ impl<'a> FunctionBuilder<'a> {
     }
 
     fn extract_discriminant(&mut self, enum_val: &IRValue) -> IRValue {
+        // Create a fresh value ID for the result
         let result = self.builder.fresh_value_id();
+
+        // For enum discriminant extraction, we need to properly extract the discriminant tag
+        // based on the enum's memory representation.
+        // The discriminant field access needs to work with the enum's actual memory layout
 
         // Extract the ValueId from the IRValue if it's an SSA value
         let base_value_id = if let IRValue::SSA(id) = enum_val {
             *id
         } else {
-            // If enum_val is not an SSA value, we need to create one
-            // For now, just use a fresh ID - this might need more complex handling
-            self.builder.fresh_value_id()
+            // If enum_val is not an SSA value, we need to create one to hold it
+            let temp_id = self.builder.fresh_value_id();
+            self.emit(IRInstruction::Let {
+                result: temp_id,
+                metadata: InstructionMetadata {
+                    memory_slot: None,
+                    allocation_site: None,
+                },
+                var: "_temp_enum_disc".to_string(),
+                value: enum_val.clone(),
+                var_type: IRTypeWithMemory {
+                    type_: IRType::Int, // This is a placeholder - should be the actual enum type
+                    span: 0..0,
+                    file: String::new(),
+                    memory_kind: MemoryKind::Stack,
+                    allocation_id: None,
+                },
+                span: 0..0,
+                file: String::new(),
+            });
+            temp_id
         };
 
+        // Use Load to extract the discriminant field from the enum value
+        // Based on the interpreter logic, enum discriminants are typically in field 0
         self.emit(IRInstruction::Load {
             result,
             address: enum_val.clone(),

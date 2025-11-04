@@ -1,0 +1,6 @@
+let x = Option::Some(5);
+
+match x {
+    Option::Some(n) => n * 2,
+    Option::None => 0
+}
