@@ -196,7 +196,7 @@ Errors and warnings are formatted using the `ariadne` crate for clear, contextua
 
 ### Compilation Units
 
-- **File-based modules**: Each `.ni` file is a compilation unit
+- **File-based modules**: Each `.vi` file is a compilation unit
 - **Dependency tracking**: Tracks dependencies between modules
 - **Separate compilation**: Planned support for separate compilation
 

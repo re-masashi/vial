@@ -288,7 +288,7 @@ pub struct EffectHandler {
 pub struct Import {
     pub span: Range<usize>,
     pub file: String,
-    pub path: Vec<String>,                    // ["abc", "ab"] for "abc/ab.ni"
+    pub path: Vec<String>,                    // ["abc", "ab"] for "abc/ab.vi"
     pub items: Vec<(String, Option<String>)>, // for selective imports + aliases
     // none implies all being imported
     pub alias: Option<String>,

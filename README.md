@@ -30,7 +30,7 @@ cd vial
 cargo build --release
 
 # Run the project
-cargo run -- examples/basic.ni
+cargo run -- examples/basic.vi
 ```
 
 ## Usage
@@ -39,21 +39,21 @@ cargo run -- examples/basic.ni
 
 ```bash
 # Basic usage
-cargo run -- <file.ni>
+cargo run -- <file.vi>
 
 # Examples
-cargo run -- examples/basic.ni
-cargo run -- examples/example.ni
-cargo run -- examples/fancy.ni
+cargo run -- examples/basic.vi
+cargo run -- examples/example.vi
+cargo run -- examples/fancy.vi
 ```
 
 ### Debug Mode
 
 ```bash
 # With debug output
-cargo run -- --debug examples/basic.ni
+cargo run -- --debug examples/basic.vi
 # or
-cargo run -- -d examples/basic.ni
+cargo run -- -d examples/basic.vi
 ```
 
 ## Language Syntax

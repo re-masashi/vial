@@ -15,7 +15,7 @@ fn dummy_span() -> Range<usize> {
 }
 
 fn dummy_file() -> String {
-    "test.ni".to_string()
+    "test.vi".to_string()
 }
 
 fn cleanup_test_env(test_dir: &PathBuf) {
@@ -63,7 +63,7 @@ fn test_duplicate_function_detection() {
         },
     ];
 
-    let _result = validator.validate(nodes, &PathBuf::from("test.ni"));
+    let _result = validator.validate(nodes, &PathBuf::from("test.vi"));
 
     assert!(validator.diagnostics.has_errors());
     assert_eq!(validator.diagnostics.errors.len(), 1);
@@ -117,7 +117,7 @@ fn test_duplicate_struct_fields() {
         attributes: vec![],
     }];
 
-    let _result = validator.validate(nodes, &PathBuf::from("test.ni"));
+    let _result = validator.validate(nodes, &PathBuf::from("test.vi"));
 
     assert!(validator.diagnostics.has_errors());
     match &validator.diagnostics.errors[0] {
@@ -148,7 +148,7 @@ fn test_break_outside_loop() {
         attributes: vec![],
     }];
 
-    let _result = validator.validate(nodes, &PathBuf::from("test.ni"));
+    let _result = validator.validate(nodes, &PathBuf::from("test.vi"));
 
     assert!(validator.diagnostics.has_errors());
     match &validator.diagnostics.errors[0] {
@@ -175,7 +175,7 @@ fn test_continue_outside_loop() {
         attributes: vec![],
     }];
 
-    let _result = validator.validate(nodes, &PathBuf::from("test.ni"));
+    let _result = validator.validate(nodes, &PathBuf::from("test.vi"));
 
     assert!(validator.diagnostics.has_errors());
     match &validator.diagnostics.errors[0] {
@@ -202,7 +202,7 @@ fn test_return_outside_function() {
         attributes: vec![],
     }];
 
-    let _result = validator.validate(nodes, &PathBuf::from("test.ni"));
+    let _result = validator.validate(nodes, &PathBuf::from("test.vi"));
 
     assert!(
         !validator.diagnostics.has_errors(),
@@ -232,7 +232,7 @@ fn test_break_inside_loop_is_valid() {
         attributes: vec![],
     }];
 
-    let _result = validator.validate(nodes, &PathBuf::from("test.ni"));
+    let _result = validator.validate(nodes, &PathBuf::from("test.vi"));
 
     assert!(!validator.diagnostics.has_errors());
 }
@@ -269,7 +269,7 @@ fn test_struct_methods_extracted_to_impl() {
         attributes: vec![],
     }];
 
-    let result = validator.validate(nodes, &PathBuf::from("test.ni"));
+    let result = validator.validate(nodes, &PathBuf::from("test.vi"));
 
     assert!(!validator.diagnostics.has_errors());
 
@@ -329,7 +329,7 @@ fn test_enum_methods_extracted_to_impl() {
         attributes: vec![],
     }];
 
-    let result = validator.validate(nodes, &PathBuf::from("test.ni"));
+    let result = validator.validate(nodes, &PathBuf::from("test.vi"));
 
     assert!(!validator.diagnostics.has_errors());
     assert_eq!(result.len(), 2);
@@ -394,7 +394,7 @@ fn test_duplicate_methods_in_struct() {
         attributes: vec![],
     }];
 
-    let _result = validator.validate(nodes, &PathBuf::from("test.ni"));
+    let _result = validator.validate(nodes, &PathBuf::from("test.vi"));
 
     assert!(validator.diagnostics.has_errors());
     match &validator.diagnostics.errors[0] {
@@ -417,40 +417,40 @@ fn test_nested_loops_with_valid_break_continue() {
     // while { for { if { break } } }
     let expr = Expr {
         span: 0..100,
-        file: "test.ni".to_string(),
+        file: "test.vi".to_string(),
         expr: ExprKind::While(
             Box::new(Expr {
                 span: 6..10,
-                file: "test.ni".to_string(),
+                file: "test.vi".to_string(),
                 expr: ExprKind::Bool(true),
             }),
             Box::new(Expr {
                 span: 12..98,
-                file: "test.ni".to_string(),
+                file: "test.vi".to_string(),
                 expr: ExprKind::For {
                     iterator: Box::new(Expr {
                         span: 16..20,
-                        file: "test.ni".to_string(),
+                        file: "test.vi".to_string(),
                         expr: ExprKind::Array(vec![]),
                     }),
                     value: "x".to_string(),
                     expression: Box::new(Expr {
                         span: 24..95,
-                        file: "test.ni".to_string(),
+                        file: "test.vi".to_string(),
                         expr: ExprKind::IfElse {
                             condition: Box::new(Expr {
                                 span: 27..31,
-                                file: "test.ni".to_string(),
+                                file: "test.vi".to_string(),
                                 expr: ExprKind::Bool(true),
                             }),
                             then: Box::new(Expr {
                                 span: 35..40,
-                                file: "test.ni".to_string(),
+                                file: "test.vi".to_string(),
                                 expr: ExprKind::Break(None), // Valid - inside for loop
                             }),
                             else_: Some(Box::new(Expr {
                                 span: 45..53,
-                                file: "test.ni".to_string(),
+                                file: "test.vi".to_string(),
                                 expr: ExprKind::Continue, // Valid - inside for loop
                             })),
                         },
@@ -462,12 +462,12 @@ fn test_nested_loops_with_valid_break_continue() {
 
     let nodes = vec![ASTNode {
         span: 0..100,
-        file: "test.ni".to_string(),
+        file: "test.vi".to_string(),
         node: ASTNodeKind::Expr(expr),
         attributes: vec![],
     }];
 
-    let _result = validator.validate(nodes, &PathBuf::from("test.ni"));
+    let _result = validator.validate(nodes, &PathBuf::from("test.vi"));
     assert!(
         !validator.diagnostics.has_errors(),
         "Nested loops with break/continue should be valid"
@@ -483,7 +483,7 @@ fn test_struct_with_multiple_impls_and_methods() {
     let methods: Vec<Function> = (0..10)
         .map(|i| Function {
             span: i * 10..(i + 1) * 10,
-            file: "test.ni".to_string(),
+            file: "test.vi".to_string(),
             vis: Visibility::Public,
             name: format!("method_{}", i),
             type_params: vec![],
@@ -497,7 +497,7 @@ fn test_struct_with_multiple_impls_and_methods() {
 
     let struct_def = Struct {
         span: 0..200,
-        file: "test.ni".to_string(),
+        file: "test.vi".to_string(),
         name: "Complex".to_string(),
         type_params: vec![],
         fields: vec![],
@@ -507,12 +507,12 @@ fn test_struct_with_multiple_impls_and_methods() {
 
     let nodes = vec![ASTNode {
         span: 0..200,
-        file: "test.ni".to_string(),
+        file: "test.vi".to_string(),
         node: ASTNodeKind::Struct(struct_def),
         attributes: vec![],
     }];
 
-    let result = validator.validate(nodes, &PathBuf::from("test.ni"));
+    let result = validator.validate(nodes, &PathBuf::from("test.vi"));
 
     assert!(!validator.diagnostics.has_errors());
     assert_eq!(result.len(), 2); // Struct + Impl
@@ -532,7 +532,7 @@ fn test_generic_struct_with_complex_bounds() {
     // struct Container<T: Clone + Debug, U: Default>
     let struct_def = Struct {
         span: 0..100,
-        file: "test.ni".to_string(),
+        file: "test.vi".to_string(),
         name: "Container".to_string(),
         type_params: vec![
             TypeParam {
@@ -541,12 +541,12 @@ fn test_generic_struct_with_complex_bounds() {
                 bounds: vec![
                     TypeAnnot {
                         span: 15..20,
-                        file: "test.ni".to_string(),
+                        file: "test.vi".to_string(),
                         type_: TypeAnnotKind::Named("Clone".to_string()),
                     },
                     TypeAnnot {
                         span: 23..28,
-                        file: "test.ni".to_string(),
+                        file: "test.vi".to_string(),
                         type_: TypeAnnotKind::Named("Debug".to_string()),
                     },
                 ],
@@ -556,7 +556,7 @@ fn test_generic_struct_with_complex_bounds() {
                 kind: None,
                 bounds: vec![TypeAnnot {
                     span: 33..40,
-                    file: "test.ni".to_string(),
+                    file: "test.vi".to_string(),
                     type_: TypeAnnotKind::Named("Default".to_string()),
                 }],
             },
@@ -568,12 +568,12 @@ fn test_generic_struct_with_complex_bounds() {
 
     let nodes = vec![ASTNode {
         span: 0..100,
-        file: "test.ni".to_string(),
+        file: "test.vi".to_string(),
         node: ASTNodeKind::Struct(struct_def),
         attributes: vec![],
     }];
 
-    let _result = validator.validate(nodes, &PathBuf::from("test.ni"));
+    let _result = validator.validate(nodes, &PathBuf::from("test.vi"));
     assert!(!validator.diagnostics.has_errors());
 }
 
@@ -584,13 +584,13 @@ fn test_conflicting_method_names_across_multiple_structs() {
     // Two different structs with same method name - should be OK
     let struct1 = Struct {
         span: 0..50,
-        file: "test.ni".to_string(),
+        file: "test.vi".to_string(),
         name: "Foo".to_string(),
         type_params: vec![],
         fields: vec![],
         methods: vec![Function {
             span: 15..35,
-            file: "test.ni".to_string(),
+            file: "test.vi".to_string(),
             vis: Visibility::Public,
             name: "process".to_string(),
             type_params: vec![],
@@ -605,13 +605,13 @@ fn test_conflicting_method_names_across_multiple_structs() {
 
     let struct2 = Struct {
         span: 60..110,
-        file: "test.ni".to_string(),
+        file: "test.vi".to_string(),
         name: "Bar".to_string(),
         type_params: vec![],
         fields: vec![],
         methods: vec![Function {
             span: 75..95,
-            file: "test.ni".to_string(),
+            file: "test.vi".to_string(),
             vis: Visibility::Public,
             name: "process".to_string(), // Same name, different struct - OK
             type_params: vec![],
@@ -627,19 +627,19 @@ fn test_conflicting_method_names_across_multiple_structs() {
     let nodes = vec![
         ASTNode {
             span: 0..50,
-            file: "test.ni".to_string(),
+            file: "test.vi".to_string(),
             node: ASTNodeKind::Struct(struct1),
             attributes: vec![],
         },
         ASTNode {
             span: 60..110,
-            file: "test.ni".to_string(),
+            file: "test.vi".to_string(),
             node: ASTNodeKind::Struct(struct2),
             attributes: vec![],
         },
     ];
 
-    let _result = validator.validate(nodes, &PathBuf::from("test.ni"));
+    let _result = validator.validate(nodes, &PathBuf::from("test.vi"));
     assert!(
         !validator.diagnostics.has_errors(),
         "Same method name in different structs should be valid"
@@ -655,7 +655,7 @@ fn test_duplicate_across_different_scopes() {
     // Top-level function and enum with same name - ERROR
     let func = Function {
         span: 0..20,
-        file: "test.ni".to_string(),
+        file: "test.vi".to_string(),
         vis: Visibility::Public,
         name: "Result".to_string(),
         type_params: vec![],
@@ -668,7 +668,7 @@ fn test_duplicate_across_different_scopes() {
 
     let enum_def = Enum {
         span: 30..60,
-        file: "test.ni".to_string(),
+        file: "test.vi".to_string(),
         name: "Result".to_string(), // Duplicate
         type_params: vec![],
         variants: vec![],
@@ -679,19 +679,19 @@ fn test_duplicate_across_different_scopes() {
     let nodes = vec![
         ASTNode {
             span: 0..20,
-            file: "test.ni".to_string(),
+            file: "test.vi".to_string(),
             node: ASTNodeKind::Function(Box::new(func)),
             attributes: vec![],
         },
         ASTNode {
             span: 30..60,
-            file: "test.ni".to_string(),
+            file: "test.vi".to_string(),
             node: ASTNodeKind::Enum(enum_def),
             attributes: vec![],
         },
     ];
 
-    let _result = validator.validate(nodes, &PathBuf::from("test.ni"));
+    let _result = validator.validate(nodes, &PathBuf::from("test.vi"));
     assert!(validator.diagnostics.has_errors());
 }
 
@@ -702,13 +702,13 @@ fn test_shadowing_in_nested_scopes_allowed() {
     // let x = 5; { let x = 10; } - should be OK (shadowing)
     let inner = Expr {
         span: 12..22,
-        file: "test.ni".to_string(),
+        file: "test.vi".to_string(),
         expr: ExprKind::Let {
             var: "x".to_string(),
             type_annot: None,
             value: Box::new(Expr {
                 span: 20..22,
-                file: "test.ni".to_string(),
+                file: "test.vi".to_string(),
                 expr: ExprKind::Int(10),
             }),
         },
@@ -716,24 +716,24 @@ fn test_shadowing_in_nested_scopes_allowed() {
 
     let outer = Expr {
         span: 0..25,
-        file: "test.ni".to_string(),
+        file: "test.vi".to_string(),
         expr: ExprKind::Block(vec![
             Expr {
                 span: 0..10,
-                file: "test.ni".to_string(),
+                file: "test.vi".to_string(),
                 expr: ExprKind::Let {
                     var: "x".to_string(),
                     type_annot: None,
                     value: Box::new(Expr {
                         span: 8..9,
-                        file: "test.ni".to_string(),
+                        file: "test.vi".to_string(),
                         expr: ExprKind::Int(5),
                     }),
                 },
             },
             Expr {
                 span: 11..24,
-                file: "test.ni".to_string(),
+                file: "test.vi".to_string(),
                 expr: ExprKind::Block(vec![inner]),
             },
         ]),
@@ -741,12 +741,12 @@ fn test_shadowing_in_nested_scopes_allowed() {
 
     let nodes = vec![ASTNode {
         span: 0..25,
-        file: "test.ni".to_string(),
+        file: "test.vi".to_string(),
         node: ASTNodeKind::Expr(outer),
         attributes: vec![],
     }];
 
-    let _result = validator.validate(nodes, &PathBuf::from("test.ni"));
+    let _result = validator.validate(nodes, &PathBuf::from("test.vi"));
     assert!(
         !validator.diagnostics.has_errors(),
         "Variable shadowing in nested blocks should be allowed"
@@ -761,9 +761,9 @@ fn test_circular_import_detection_three_modules() {
     let test_dir = PathBuf::from("test_circular");
     let _ = fs::create_dir_all(test_dir.join("src"));
 
-    // a.ni imports b.ni
-    // b.ni imports c.ni
-    // c.ni imports a.ni -> CIRCULAR!
+    // a.vi imports b.vi
+    // b.vi imports c.vi
+    // c.vi imports a.vi -> CIRCULAR!
 
     // This test requires actual file I/O to work properly
     // Skip for now, but structure is here
@@ -777,7 +777,7 @@ fn test_import_nonexistent_module() {
 
     let import = Import {
         span: 0..30,
-        file: "test.ni".to_string(),
+        file: "test.vi".to_string(),
         path: vec!["nonexistent".to_string(), "module".to_string()],
         items: vec![],
         alias: None,
@@ -785,16 +785,16 @@ fn test_import_nonexistent_module() {
 
     let nodes = vec![ASTNode {
         span: 0..30,
-        file: "test.ni".to_string(),
+        file: "test.vi".to_string(),
         node: ASTNodeKind::Expr(Expr {
             span: 0..30,
-            file: "test.ni".to_string(),
+            file: "test.vi".to_string(),
             expr: ExprKind::Import(import),
         }),
         attributes: vec![],
     }];
 
-    let _result = validator.validate(nodes, &PathBuf::from("test.ni"));
+    let _result = validator.validate(nodes, &PathBuf::from("test.vi"));
     assert!(validator.diagnostics.has_errors());
 
     match &validator.diagnostics.errors[0] {
@@ -815,7 +815,7 @@ fn test_wildcard_import_with_specific_items_conflict() {
     // import "module" { * }  -- should import everything
     let import = Import {
         span: 0..20,
-        file: "test.ni".to_string(),
+        file: "test.vi".to_string(),
         path: vec!["std".to_string(), "io".to_string()],
         items: vec![], // Empty = wildcard
         alias: None,
@@ -823,15 +823,15 @@ fn test_wildcard_import_with_specific_items_conflict() {
 
     let nodes = vec![ASTNode {
         span: 0..20,
-        file: "test.ni".to_string(),
+        file: "test.vi".to_string(),
         node: ASTNodeKind::Expr(Expr {
             span: 0..20,
-            file: "test.ni".to_string(),
+            file: "test.vi".to_string(),
             expr: ExprKind::Import(import),
         }),
         attributes: vec![],
     }];
 
-    let _result = validator.validate(nodes, &PathBuf::from("test.ni"));
+    let _result = validator.validate(nodes, &PathBuf::from("test.vi"));
     // Should not error - std lib imports are handled specially
 }

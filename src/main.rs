@@ -223,7 +223,7 @@ fn main() {
 ///
 /// ```
 /// // Call with no errors to verify invocation doesn't panic.
-/// report_parse_errors(&[], &[], "example.ni", "");
+/// report_parse_errors(&[], &[], "example.vi", "");
 /// ```
 fn report_parse_errors(
     errors: &[chumsky::error::Rich<'_, Token>],
@@ -588,11 +588,11 @@ mod tests {
             attributes: vec![],
         }];
 
-        set_file_names_in_ast(&mut nodes, "test.ni");
+        set_file_names_in_ast(&mut nodes, "test.vi");
 
-        assert_eq!(nodes[0].file, "test.ni");
+        assert_eq!(nodes[0].file, "test.vi");
         if let ASTNodeKind::Expr(ref expr) = nodes[0].node {
-            assert_eq!(expr.file, "test.ni");
+            assert_eq!(expr.file, "test.vi");
         }
     }
 
@@ -609,11 +609,11 @@ mod tests {
             attributes: vec![],
         };
 
-        set_file_names_in_ast_node(&mut node, "test.ni");
+        set_file_names_in_ast_node(&mut node, "test.vi");
 
-        assert_eq!(node.file, "test.ni");
+        assert_eq!(node.file, "test.vi");
         if let ASTNodeKind::Expr(ref expr) = node.node {
-            assert_eq!(expr.file, "test.ni");
+            assert_eq!(expr.file, "test.vi");
         }
     }
 
@@ -625,8 +625,8 @@ mod tests {
             expr: ExprKind::Int(42),
         };
 
-        set_file_names_in_expr(&mut expr, "test.ni");
-        assert_eq!(expr.file, "test.ni");
+        set_file_names_in_expr(&mut expr, "test.vi");
+        assert_eq!(expr.file, "test.vi");
     }
 
     #[test]
@@ -646,11 +646,11 @@ mod tests {
             },
         };
 
-        set_file_names_in_expr(&mut expr, "test.ni");
-        assert_eq!(expr.file, "test.ni");
+        set_file_names_in_expr(&mut expr, "test.vi");
+        assert_eq!(expr.file, "test.vi");
 
         if let ExprKind::Let { value, .. } = &expr.expr {
-            assert_eq!(value.file, "test.ni");
+            assert_eq!(value.file, "test.vi");
         }
     }
 
@@ -679,8 +679,8 @@ mod tests {
             },
         };
 
-        set_file_names_in_expr(&mut expr, "test.ni");
-        assert_eq!(expr.file, "test.ni");
+        set_file_names_in_expr(&mut expr, "test.vi");
+        assert_eq!(expr.file, "test.vi");
 
         if let ExprKind::IfElse {
             condition,
@@ -688,10 +688,10 @@ mod tests {
             else_,
         } = &expr.expr
         {
-            assert_eq!(condition.file, "test.ni");
-            assert_eq!(then.file, "test.ni");
+            assert_eq!(condition.file, "test.vi");
+            assert_eq!(then.file, "test.vi");
             if let Some(else_expr) = else_ {
-                assert_eq!(else_expr.file, "test.ni");
+                assert_eq!(else_expr.file, "test.vi");
             }
         }
     }

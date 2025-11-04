@@ -12,7 +12,7 @@ fn dummy_span() -> std::ops::Range<usize> {
 }
 
 fn dummy_file() -> String {
-    "test.ni".to_string()
+    "test.vi".to_string()
 }
 
 // Basic Type Inference Tests
