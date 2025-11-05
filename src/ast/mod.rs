@@ -184,6 +184,7 @@ pub enum ExprKind {
 
     BinOp(Box<Expr>, BinOp, Box<Expr>),
     UnOp(UnOp, Box<Expr>),
+    Spread(Box<Expr>), // Represents the ...expr syntax in array expressions
     Assign {
         l_val: Box<Expr>,
         r_val: Box<Expr>,
@@ -195,7 +196,7 @@ pub enum ExprKind {
         value: Box<Expr>,
     },
 
-    Array(Vec<Expr>),
+    Array(Vec<Expr>), // Could contain regular elements and/or spread elements
     Tuple(Vec<Expr>),
     Map(Vec<(Expr, Expr)>),
     EnumConstruct {
@@ -372,7 +373,7 @@ pub enum PatKind {
     Wildcard,
     Bind(String),
     Literal(Literal),
-    Array(Vec<Pattern>),
+    Array(Vec<ArrayPatElement>),
     Tuple(Vec<Pattern>),
     Or(Vec<Pattern>),
     As {
@@ -392,6 +393,12 @@ pub enum PatKind {
     Rest(String),
 
     Error,
+}
+
+#[derive(Debug, Clone)]
+pub enum ArrayPatElement {
+    Pattern(Pattern),
+    Spread(Pattern),
 }
 
 #[derive(Debug, Clone)]
@@ -826,6 +833,10 @@ pub enum TypedExprKind {
         op: UnOp,
         operand: Box<TypedExpr>,
     },
+    Spread {
+        value: Box<TypedExpr>,
+        element_type: Rc<Type>,
+    },
     Assign {
         l_val: Box<TypedExpr>,
         r_val: Box<TypedExpr>,
@@ -997,7 +1008,7 @@ pub enum TypedPatKind {
     },
     Literal(Literal),
     Array {
-        patterns: Vec<TypedPattern>,
+        elements: Vec<TypedArrayPatElement>,
         element_type: Rc<Type>,
     },
     Tuple {
@@ -1032,6 +1043,12 @@ pub enum TypedPatKind {
     },
 
     Error,
+}
+
+#[derive(Debug, Clone)]
+pub enum TypedArrayPatElement {
+    Pattern(TypedPattern),
+    Spread(TypedPattern),
 }
 
 #[derive(Debug, Clone)]

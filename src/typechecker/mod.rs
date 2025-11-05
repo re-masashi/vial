@@ -2163,6 +2163,10 @@ impl TypeChecker {
                     );
                 }
             }
+            TypedExprKind::Spread { value, .. } => {
+                // For spread expressions, capture from the underlying value
+                self.collect_captures_from_expr(value, lambda_arg_binding_ids, captures, visited);
+            }
             TypedExprKind::Break(expr) => {
                 if let Some(break_expr) = expr {
                     self.collect_captures_from_expr(
@@ -2896,6 +2900,60 @@ impl TypeChecker {
                         element_type: elem_ty.clone(),
                     },
                     type_: self.array_type(elem_ty),
+                }
+            }
+            ExprKind::Spread(spread_expr) => {
+                // Spread expression: ...expr where expr should be an array
+                let spread_val = self.check_expr(spread_expr);
+
+                // The expression in a spread must be an array
+                let element_type = if let TypeKind::Constructor { name, args, .. } =
+                    &spread_val.type_.type_
+                {
+                    let type_name = self.interner.resolve(Symbol(*name));
+                    if type_name == "Array" && !args.is_empty() {
+                        args[0].clone() // Extract the element type from Array<T>
+                    } else {
+                        // Error: spread argument must be an array
+                        let temp_type = self.fresh_type_var();
+                        let expected_array_type = self.array_type(temp_type); // Pre-compute to avoid borrowing conflicts
+                        self.diagnostics.add_type_error(TypeError {
+                            span: expr.span.clone(),
+                            file: expr.file.clone(),
+                            kind: TypeErrorKind::TypeMismatch {
+                                expected: expected_array_type, // Use the pre-computed type
+                                found: spread_val.type_.clone(),
+                                context: "spread operator argument must be an array".to_string(),
+                            },
+                        });
+                        self.fresh_type_var()
+                    }
+                } else {
+                    // Error: spread argument must be an array
+                    let temp_type2 = self.fresh_type_var();
+                    let expected_array_type = self.array_type(temp_type2); // Pre-compute to avoid borrowing conflicts
+                    self.diagnostics.add_type_error(TypeError {
+                        span: expr.span.clone(),
+                        file: expr.file.clone(),
+                        kind: TypeErrorKind::TypeMismatch {
+                            expected: expected_array_type, // Use the pre-computed type
+                            found: spread_val.type_.clone(),
+                            context: "spread operator argument must be an array".to_string(),
+                        },
+                    });
+                    self.fresh_type_var()
+                };
+
+                // For the type of the spread expression itself, we return the element type
+                // since spread is used inside arrays to denote elements
+                TypedExpr {
+                    span: expr.span.clone(),
+                    file: expr.file.clone(),
+                    expr: TypedExprKind::Spread {
+                        value: Box::new(spread_val),
+                        element_type: element_type.clone(),
+                    },
+                    type_: element_type,
                 }
             }
 
@@ -4035,21 +4093,32 @@ impl TypeChecker {
                 }
             }
 
-            PatKind::Array(patterns) => {
+            PatKind::Array(elements) => {
                 let elem_type = self.fresh_type_var();
                 let array_type = self.array_type(elem_type.clone());
                 self.unify(&array_type, expected_ty, &pat.span, &pat.file.clone());
 
-                let typed_patterns: Vec<_> = patterns
+                let typed_elements: Vec<_> = elements
                     .iter()
-                    .map(|p| self.check_pattern(p, &elem_type))
+                    .map(|element| match element {
+                        crate::ast::ArrayPatElement::Pattern(pattern) => {
+                            crate::ast::TypedArrayPatElement::Pattern(
+                                self.check_pattern(pattern, &elem_type),
+                            )
+                        }
+                        crate::ast::ArrayPatElement::Spread(pattern) => {
+                            crate::ast::TypedArrayPatElement::Spread(
+                                self.check_pattern(pattern, &array_type),
+                            )
+                        }
+                    })
                     .collect();
 
                 TypedPattern {
                     span: pat.span.clone(),
                     file: pat.file.clone(),
                     pat: TypedPatKind::Array {
-                        patterns: typed_patterns,
+                        elements: typed_elements,
                         element_type: elem_type.clone(),
                     },
                     type_: array_type,
@@ -6364,6 +6433,13 @@ impl TypeChecker {
             span: expr.span,
             file: expr.file,
             expr: match expr.expr {
+                TypedExprKind::Spread {
+                    value,
+                    element_type,
+                } => TypedExprKind::Spread {
+                    value: Box::new(self.apply_substitution_to_expr(*value)),
+                    element_type: self.substitution.apply(&element_type),
+                },
                 TypedExprKind::BinOp { left, right, op } => TypedExprKind::BinOp {
                     left: Box::new(self.apply_substitution_to_expr(*left)),
                     right: Box::new(self.apply_substitution_to_expr(*right)),
@@ -6671,6 +6747,106 @@ impl TypeChecker {
                 },
             },
             type_: self.substitution.apply(&expr.type_),
+        }
+    }
+
+    #[allow(dead_code)]
+    fn apply_substitution_to_pattern(&self, pattern: TypedPattern) -> TypedPattern {
+        TypedPattern {
+            span: pattern.span,
+            file: pattern.file,
+            pat: match pattern.pat {
+                TypedPatKind::Array {
+                    elements,
+                    element_type,
+                } => TypedPatKind::Array {
+                    elements: elements
+                        .into_iter()
+                        .map(|element| match element {
+                            crate::ast::TypedArrayPatElement::Pattern(pattern) => {
+                                crate::ast::TypedArrayPatElement::Pattern(
+                                    self.apply_substitution_to_pattern(pattern),
+                                )
+                            }
+                            crate::ast::TypedArrayPatElement::Spread(pattern) => {
+                                crate::ast::TypedArrayPatElement::Spread(
+                                    self.apply_substitution_to_pattern(pattern),
+                                )
+                            }
+                        })
+                        .collect(),
+                    element_type: self.substitution.apply(&element_type),
+                },
+                TypedPatKind::Tuple {
+                    patterns,
+                    element_types,
+                } => TypedPatKind::Tuple {
+                    patterns: patterns
+                        .into_iter()
+                        .map(|p| self.apply_substitution_to_pattern(p))
+                        .collect(),
+                    element_types: element_types
+                        .into_iter()
+                        .map(|t| self.substitution.apply(&t))
+                        .collect(),
+                },
+                TypedPatKind::Or(patterns) => TypedPatKind::Or(
+                    patterns
+                        .into_iter()
+                        .map(|p| self.apply_substitution_to_pattern(p))
+                        .collect(),
+                ),
+                TypedPatKind::As {
+                    name,
+                    binding_id,
+                    pattern,
+                } => TypedPatKind::As {
+                    name,
+                    binding_id,
+                    pattern: Box::new(self.apply_substitution_to_pattern(*pattern)),
+                },
+                TypedPatKind::Struct {
+                    name,
+                    struct_id,
+                    fields,
+                } => TypedPatKind::Struct {
+                    name,
+                    struct_id,
+                    fields: fields
+                        .into_iter()
+                        .map(|(field_name, field_id, p)| {
+                            (field_name, field_id, self.apply_substitution_to_pattern(p))
+                        })
+                        .collect(),
+                },
+                TypedPatKind::Enum {
+                    enum_name,
+                    enum_id,
+                    variant,
+                    variant_id,
+                    params,
+                } => TypedPatKind::Enum {
+                    enum_name,
+                    enum_id,
+                    variant,
+                    variant_id,
+                    params: params
+                        .into_iter()
+                        .map(|p| self.apply_substitution_to_pattern(p))
+                        .collect(),
+                },
+                TypedPatKind::Range { start, end } => TypedPatKind::Range {
+                    start: Box::new(self.apply_substitution_to_expr(*start)),
+                    end: Box::new(self.apply_substitution_to_expr(*end)),
+                },
+                TypedPatKind::Rest { name, binding_id } => TypedPatKind::Rest { name, binding_id },
+                // For patterns that don't contain sub-patterns or expressions
+                TypedPatKind::Wildcard => TypedPatKind::Wildcard,
+                TypedPatKind::Bind { name, binding_id } => TypedPatKind::Bind { name, binding_id },
+                TypedPatKind::Literal(lit) => TypedPatKind::Literal(lit),
+                TypedPatKind::Error => TypedPatKind::Error,
+            },
+            type_: self.substitution.apply(&pattern.type_),
         }
     }
 }

@@ -249,6 +249,9 @@ pub enum Token {
     #[token(".")]
     Dot,
 
+    #[token("...")]
+    Spread,
+
     #[token("..")]
     DotDot,
 
@@ -395,6 +398,7 @@ impl fmt::Display for Token {
             Token::Colon => write!(f, ":"),
             Token::Dot => write!(f, "."),
             Token::DotDot => write!(f, ".."),
+            Token::Spread => write!(f, "..."),
             Token::Access => write!(f, "::"),
             Token::Arrow => write!(f, "->"),
             Token::Tilde => write!(f, "~"),

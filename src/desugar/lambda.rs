@@ -98,6 +98,21 @@ impl LambdaDesugarer {
     fn desugar_expr(&mut self, expr: TypedExpr) -> (TypedExpr, Vec<TypedASTNode>) {
         let mut new_functions = Vec::new();
         let new_expr = match expr.expr {
+            TypedExprKind::Spread {
+                value,
+                element_type,
+            } => {
+                // For spread, we'll return the expression as-is with the same structure
+                TypedExpr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: TypedExprKind::Spread {
+                        value,
+                        element_type,
+                    },
+                    type_: expr.type_,
+                }
+            }
             TypedExprKind::Lambda {
                 args,
                 body,

@@ -1275,6 +1275,11 @@ impl<'a> FunctionBuilder<'a> {
 
                 IRValue::SSA(result)
             }
+            TypedExprKind::Spread { value, .. } => {
+                // Handle spread expression in array context
+                // For now, just return the underlying value since spread is a compile-time operation
+                self.lower_expr(value)
+            }
             TypedExprKind::Let {
                 var: _,
                 binding_id,
@@ -1872,8 +1877,13 @@ impl<'a> FunctionBuilder<'a> {
                 pattern: nested_pattern,
                 ..
             } => Self::contains_literal_patterns(nested_pattern),
-            TypedPatKind::Array { patterns, .. } => {
-                patterns.iter().any(Self::contains_literal_patterns)
+            TypedPatKind::Array { elements, .. } => {
+                elements.iter().any(|element| match element {
+                    crate::ast::TypedArrayPatElement::Pattern(pattern) => {
+                        Self::contains_literal_patterns(pattern)
+                    }
+                    crate::ast::TypedArrayPatElement::Spread(_) => false, // Spread patterns don't contain literal patterns
+                })
             }
             TypedPatKind::Error => false,
             TypedPatKind::Range { .. } | TypedPatKind::Rest { .. } => false, // Simplified - might need more logic
@@ -2584,6 +2594,58 @@ impl<'a> FunctionBuilder<'a> {
                 }
                 // Then bind the inner pattern
                 self.bind_pattern(pattern, value);
+            }
+
+            crate::ast::TypedPatKind::Array {
+                elements,
+                element_type: _,
+            } => {
+                // Handle array pattern matching by extracting elements and binding them to patterns
+                // For patterns without spread, we extract each element by index
+                // For patterns with spread, a more complex implementation would be needed (slicing)
+
+                let mut element_idx = 0;
+
+                for element in elements {
+                    match element {
+                        crate::ast::TypedArrayPatElement::Pattern(pattern) => {
+                            // Extract element at current index from the array
+                            let element_value = self.builder.fresh_value_id();
+
+                            // Use IR's Index instruction to extract the array element at index
+                            self.emit(IRInstruction::Index {
+                                result: element_value,
+                                target: value.clone(), // The array value
+                                index: IRValue::Int(element_idx), // Current index
+                                metadata: InstructionMetadata {
+                                    memory_slot: None,
+                                    allocation_site: None,
+                                },
+                                element_type: IRTypeWithMemory {
+                                    type_: IRType::Int, // This should be adjusted based on the actual element type
+                                    span: 0..0,
+                                    file: String::new(),
+                                    memory_kind: MemoryKind::Stack,
+                                    allocation_id: None,
+                                },
+                                span: 0..0,
+                                file: String::new(),
+                            });
+
+                            // Bind the extracted element to the pattern
+                            self.bind_pattern(pattern, IRValue::SSA(element_value));
+                            element_idx += 1;
+                        }
+                        crate::ast::TypedArrayPatElement::Spread(_pattern) => {
+                            // Spread patterns like `...rest` require array slicing which is complex
+                            // This would require runtime array operations to extract remaining elements
+                            // For now, we'll note that this is a missing feature
+                            todo!(
+                                "Array pattern with spread operator requires array slicing implementation"
+                            );
+                        }
+                    }
+                }
             }
 
             _ => {

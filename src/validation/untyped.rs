@@ -516,6 +516,10 @@ impl UntypedValidator {
             | ExprKind::Import(_) => {
                 expr.expr // Keep as is
             }
+            ExprKind::Spread(spread_expr) => {
+                // For spread operator, just pass through the expression
+                ExprKind::Spread(Box::new(self.desugar_builtin_macros(*spread_expr)))
+            }
         };
 
         Expr {
@@ -1073,6 +1077,15 @@ impl UntypedValidator {
                 }
             }
 
+            ExprKind::Spread(spread_expr) => {
+                // Validate the spread argument, then pass it through
+                let validated_spread = self.validate_expr(*spread_expr);
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::Spread(Box::new(validated_spread)),
+                }
+            }
             ExprKind::Import(import) => {
                 // Import validation is handled by ModuleResolver during import resolution
                 Expr {

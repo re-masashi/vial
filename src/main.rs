@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use vial::ast::Interner;
 use vial::ast::*;
+use vial::desugar::array_patterns::ArrayPatternDesugarer;
 use vial::desugar::lambda::LambdaDesugarer;
 use vial::desugar::methods::MethodCallDesugarer;
 use vial::interpreter::Interpreter;
@@ -18,9 +19,9 @@ use vial::typechecker::monomorphizer::Monomorphizer;
 use vial::validation::{TypedValidator, UntypedValidator};
 
 /// Entry point for the compiler CLI that runs the full compile pipeline (lexing, parsing,
-/// untyped validation, method-call desugaring, type checking, lambda desugaring,
-/// monomorphization, typed validation, and IR generation) and optionally executes the
-/// resulting IR with the interpreter or dumps the IR.
+/// untyped validation, method-call desugaring, array pattern desugaring, type checking,
+/// lambda desugaring, monomorphization, typed validation, and IR generation) and optionally
+/// executes the resulting IR with the interpreter or dumps the IR.
 ///
 /// When the `--ir-dump` / `-i` flag is present the generated IR module is printed.
 /// When the `--execute` / `-e` flag is present the runtime will attempt to locate a
@@ -121,10 +122,14 @@ fn main() {
     let mut method_desugarer = MethodCallDesugarer::new();
     let method_desugared_ast = method_desugarer.desugar_program(validated_ast);
 
-    println!("[5/7] Type checking...");
+    println!("[5/7] Desugaring array patterns...");
+    let mut array_pattern_desugarer = ArrayPatternDesugarer::new();
+    let array_pattern_desugared_ast = array_pattern_desugarer.desugar_program(method_desugared_ast);
+
+    println!("[6/7] Type checking...");
     let interner = Interner::new();
     let mut type_checker = TypeChecker::new(interner);
-    let typed_ast = type_checker.check_program(method_desugared_ast);
+    let typed_ast = type_checker.check_program(array_pattern_desugared_ast);
 
     if type_checker.diagnostics.has_errors() {
         report_type_diagnostics(&type_checker, &token_spans, filename, &source);
@@ -135,12 +140,12 @@ fn main() {
         std::process::exit(1);
     }
 
-    println!("[6/7] Desugaring lambdas...");
+    println!("[7/7] Desugaring lambdas...");
     let final_interner = type_checker.interner;
     let mut lambda_desugarer = LambdaDesugarer::new(final_interner);
     let lambda_desugared_ast = lambda_desugarer.desugar_program(typed_ast);
 
-    println!("[7/7] Monomorphizing...");
+    println!("[8/8] Monomorphizing...");
     let final_interner = lambda_desugarer.interner;
     let mut monomorphizer = Monomorphizer::new(final_interner);
     let monomorphized_ast = monomorphizer.monomorphize_program(lambda_desugared_ast);
@@ -429,6 +434,9 @@ fn set_file_names_in_expr(expr: &mut Expr, filename: &str) {
             for element in elements {
                 set_file_names_in_expr(element, filename);
             }
+        }
+        ExprKind::Spread(element) => {
+            set_file_names_in_expr(element, filename);
         }
         ExprKind::Tuple(elements) => {
             for element in elements {

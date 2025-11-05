@@ -500,6 +500,7 @@ fn desugar_expr(expr: Expr) -> Expr {
         ExprKind::Variable(name) => ExprKind::Variable(name),
         ExprKind::Continue => ExprKind::Continue,
         ExprKind::Error => ExprKind::Error,
+        ExprKind::Spread(spread_expr) => ExprKind::Spread(Box::new(desugar_expr(*spread_expr))),
         ExprKind::Import(import) => ExprKind::Import(import),
     };
 
@@ -512,9 +513,19 @@ fn desugar_expr(expr: Expr) -> Expr {
 
 fn desugar_pattern(pattern: Pattern) -> Pattern {
     let new_pat = match pattern.pat {
-        PatKind::Array(patterns) => {
-            let new_patterns = patterns.into_iter().map(desugar_pattern).collect();
-            PatKind::Array(new_patterns)
+        PatKind::Array(elements) => {
+            let new_elements = elements
+                .into_iter()
+                .map(|element| match element {
+                    ArrayPatElement::Pattern(pattern) => {
+                        ArrayPatElement::Pattern(desugar_pattern(pattern))
+                    }
+                    ArrayPatElement::Spread(pattern) => {
+                        ArrayPatElement::Spread(desugar_pattern(pattern))
+                    }
+                })
+                .collect();
+            PatKind::Array(new_elements)
         }
 
         PatKind::Tuple(patterns) => {

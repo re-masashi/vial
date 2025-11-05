@@ -1,0 +1,39 @@
+// Hypothetical Vial implementations of map and filter using array pattern matching
+
+// Recursive map implementation using array pattern matching
+def map<T, U>(arr: Array<T>, f: fn(T) -> U) -> Array<U> {
+    match arr {
+        [] => [],                    // Base case: empty array returns empty array
+        [head, ...tail] => [f(head), ...map(tail, f)]  // Apply f to head, recursively map tail
+    }
+}
+
+// Recursive filter implementation using array pattern matching
+def filter<T>(arr: Array<T>, predicate: fn(T) -> bool) -> Array<T> {
+    match arr {
+        [] => [],                    // Base case: empty array returns empty array
+        [head, ...tail] => {
+            let rest = filter(tail, predicate);
+            if predicate(head) {
+                [head, ...rest]      // Include head if it passes predicate
+            } else {
+                rest                 // Skip head if it doesn't pass predicate
+            }
+        }
+    }
+}
+
+// Example array
+let numbers = [1, 2, 3, 4, 5];
+
+// Using map to double each number
+let doubled = map(numbers, fn(x) x * 2);
+println!("Doubled: " + doubled.to_string());
+
+// Using filter to keep only even numbers
+let evens = filter(numbers, fn(x) x % 2 == 0);
+println!("Evens: " + evens.to_string());
+
+// Chaining map and filter
+let result = map(filter(numbers, fn(x) x > 2), fn(x) x * 3);
+println!("Filtered and mapped: " + result.to_string());

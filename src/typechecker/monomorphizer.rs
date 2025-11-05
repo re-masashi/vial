@@ -1808,12 +1808,12 @@ impl Monomorphizer {
             TypedPatKind::Literal(lit) => TypedPatKind::Literal(lit.clone()),
 
             TypedPatKind::Array {
-                patterns,
+                elements,
                 element_type,
             } => TypedPatKind::Array {
-                patterns: patterns
+                elements: elements
                     .iter()
-                    .map(|p| self.substitute_pattern(p, subst))
+                    .map(|e| self.substitute_array_pattern_element(e, subst))
                     .collect(),
                 element_type: subst.apply(element_type),
             },
@@ -1897,6 +1897,22 @@ impl Monomorphizer {
         }
     }
 
+    #[allow(clippy::only_used_in_recursion)]
+    fn substitute_array_pattern_element(
+        &self,
+        element: &TypedArrayPatElement,
+        subst: &Substitution,
+    ) -> TypedArrayPatElement {
+        match element {
+            TypedArrayPatElement::Pattern(pattern) => {
+                TypedArrayPatElement::Pattern(self.substitute_pattern(pattern, subst))
+            }
+            TypedArrayPatElement::Spread(pattern) => {
+                TypedArrayPatElement::Spread(self.substitute_pattern(pattern, subst))
+            }
+        }
+    }
+
     fn monomorphize_pattern(&mut self, pat: TypedPattern) -> TypedPattern {
         // Apply substitution to the pattern's type
         let new_type = self.monomorphize_type(&pat.type_);
@@ -1906,12 +1922,12 @@ impl Monomorphizer {
             TypedPatKind::Bind { name, binding_id } => TypedPatKind::Bind { name, binding_id },
             TypedPatKind::Literal(lit) => TypedPatKind::Literal(lit),
             TypedPatKind::Array {
-                patterns,
+                elements,
                 element_type,
             } => TypedPatKind::Array {
-                patterns: patterns
+                elements: elements
                     .into_iter()
-                    .map(|p| self.monomorphize_pattern(p))
+                    .map(|e| self.monomorphize_array_pattern_element(e))
                     .collect(),
                 element_type: self.monomorphize_type(&element_type),
             },
@@ -1981,6 +1997,20 @@ impl Monomorphizer {
             file: pat.file,
             pat: new_pat,
             type_: new_type,
+        }
+    }
+
+    fn monomorphize_array_pattern_element(
+        &mut self,
+        element: TypedArrayPatElement,
+    ) -> TypedArrayPatElement {
+        match element {
+            TypedArrayPatElement::Pattern(pattern) => {
+                TypedArrayPatElement::Pattern(self.monomorphize_pattern(pattern))
+            }
+            TypedArrayPatElement::Spread(pattern) => {
+                TypedArrayPatElement::Spread(self.monomorphize_pattern(pattern))
+            }
         }
     }
 
