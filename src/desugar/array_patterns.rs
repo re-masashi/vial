@@ -1,3 +1,5 @@
+// USELESS FILE, BUT MIGHT BE HELPFUL IN THE FUTURE
+
 use crate::ast::*;
 
 pub struct ArrayPatternDesugarer;
@@ -532,8 +534,7 @@ impl ArrayPatternDesugarer {
 fn desugar_pattern(pattern: Pattern) -> Pattern {
     let new_pat = match pattern.pat {
         PatKind::Array(elements) => {
-            // For each element in the array pattern, we need to check if it's a spread pattern
-            // and convert it appropriately. For now, we just recursively desugar the patterns
+            // For now, we just recursively desugar the patterns
             let new_elements = elements
                 .into_iter()
                 .map(|element| match element {

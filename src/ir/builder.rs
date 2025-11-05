@@ -2598,7 +2598,7 @@ impl<'a> FunctionBuilder<'a> {
 
             crate::ast::TypedPatKind::Array {
                 elements,
-                element_type: _,
+                element_type: _, // We'll ignore this to avoid type variable issues
             } => {
                 // Handle array pattern matching by extracting elements and binding them to patterns
                 // For patterns without spread, we extract each element by index
@@ -2622,7 +2622,7 @@ impl<'a> FunctionBuilder<'a> {
                                     allocation_site: None,
                                 },
                                 element_type: IRTypeWithMemory {
-                                    type_: IRType::Int, // This should be adjusted based on the actual element type
+                                    type_: IRType::Int, // Placeholder - type inference should handle this
                                     span: 0..0,
                                     file: String::new(),
                                     memory_kind: MemoryKind::Stack,
@@ -2636,13 +2636,40 @@ impl<'a> FunctionBuilder<'a> {
                             self.bind_pattern(pattern, IRValue::SSA(element_value));
                             element_idx += 1;
                         }
-                        crate::ast::TypedArrayPatElement::Spread(_pattern) => {
-                            // Spread patterns like `...rest` require array slicing which is complex
-                            // This would require runtime array operations to extract remaining elements
-                            // For now, we'll note that this is a missing feature
-                            todo!(
-                                "Array pattern with spread operator requires array slicing implementation"
-                            );
+                        crate::ast::TypedArrayPatElement::Spread(pattern) => {
+                            // Create a slice from the current element_idx position to the end of the array
+                            // This handles patterns like [a, b, ...rest] where 'rest' gets the remaining elements
+
+                            // Create the slice operation
+                            let result = self.builder.fresh_value_id();
+                            let alloc_id = self.builder.fresh_alloc_id();
+
+                            self.emit(IRInstruction::Slice {
+                                result,
+                                metadata: InstructionMetadata {
+                                    memory_slot: None,
+                                    allocation_site: Some(alloc_id),
+                                },
+                                array: value.clone(), // The original array being matched
+                                start: IRValue::Int(element_idx), // Start from the current index
+                                end: None,            // Slice to the end of the array
+                                element_type: IRTypeWithMemory {
+                                    type_: IRType::Int, // Placeholder - type inference should handle this
+                                    span: 0..0,
+                                    file: String::new(),
+                                    memory_kind: MemoryKind::Heap, // Arrays are heap allocated
+                                    allocation_id: None,
+                                },
+                                span: pattern.span.clone(),
+                                file: pattern.file.clone(),
+                            });
+
+                            // Bind the resulting slice to the spread pattern variable
+                            let slice_result = IRValue::SSA(result);
+                            self.bind_pattern(pattern, slice_result);
+
+                            // Break the loop since the spread pattern takes all remaining elements
+                            break;
                         }
                     }
                 }

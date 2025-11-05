@@ -123,7 +123,7 @@ fn main() {
     let method_desugared_ast = method_desugarer.desugar_program(validated_ast);
 
     println!("[5/7] Desugaring array patterns...");
-    let mut array_pattern_desugarer = ArrayPatternDesugarer::new();
+    let array_pattern_desugarer = ArrayPatternDesugarer::new();
     let array_pattern_desugared_ast = array_pattern_desugarer.desugar_program(method_desugared_ast);
 
     println!("[6/7] Type checking...");

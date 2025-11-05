@@ -486,6 +486,39 @@ impl Interpreter {
                     .insert(*result, Value::Ptr(ptr));
             }
 
+            IRInstruction::ArraySpread { result, arrays, .. } => {
+                // Evaluate all the arrays to be concatenated
+                let array_ptrs: Result<Vec<_>, _> = arrays
+                    .iter()
+                    .map(|a| self.eval_value(a).and_then(|v| v.as_ptr()))
+                    .collect();
+                let array_ptrs = array_ptrs?;
+
+                // Collect all elements from all arrays
+                let mut all_elements = Vec::new();
+                for ptr in array_ptrs {
+                    let obj = self.heap.get(ptr)?;
+                    if let super::heap::HeapObject::Array { elements } = obj {
+                        all_elements.extend(elements.clone());
+                    } else {
+                        return Err(InterpreterError::TypeError {
+                            expected: "array object for spread concatenation",
+                            got: "non-array object".to_string(),
+                        });
+                    }
+                }
+
+                // Create a new array with all the concatenated elements
+                let ptr = self.heap.allocate(super::heap::HeapObject::Array {
+                    elements: all_elements,
+                });
+                self.call_stack
+                    .current()
+                    .unwrap()
+                    .locals
+                    .insert(*result, Value::Ptr(ptr));
+            }
+
             IRInstruction::Tuple {
                 result, elements, ..
             } => {
@@ -948,6 +981,73 @@ impl Interpreter {
                             got: "non-indexable object".to_string(),
                         });
                     }
+                }
+            }
+
+            IRInstruction::Slice {
+                result,
+                array,
+                start,
+                end,
+                element_type: _,
+                ..
+            } => {
+                let array_val = self.eval_value(array)?;
+                let start_val = self.eval_value(start)?.as_int()?;
+                let start_idx = start_val as usize;
+
+                let end_idx = if let Some(end_expr) = end {
+                    let end_val = self.eval_value(end_expr)?.as_int()?;
+                    end_val as usize
+                } else {
+                    // If no end is specified, slice to the end of the array
+                    usize::MAX // Will be handled in the slice logic below
+                };
+
+                let array_ptr = array_val.as_ptr()?;
+                let obj = self.heap.get(array_ptr)?;
+
+                if let super::heap::HeapObject::Array { elements } = obj {
+                    let slice_end = if end_idx == usize::MAX {
+                        elements.len()
+                    } else {
+                        end_idx.min(elements.len())
+                    };
+
+                    // Ensure start index is valid
+                    if start_idx > elements.len() {
+                        return Err(InterpreterError::TypeError {
+                            expected: "valid start index for slice",
+                            got: format!(
+                                "start index {} in array of length {}",
+                                start_idx,
+                                elements.len()
+                            ),
+                        });
+                    }
+
+                    // Extract the slice
+                    let slice_elements = if start_idx < slice_end {
+                        elements[start_idx..slice_end].to_vec()
+                    } else {
+                        vec![] // Empty slice if start > end
+                    };
+
+                    // Allocate the new array with the sliced elements
+                    let new_ptr = self.heap.allocate(super::heap::HeapObject::Array {
+                        elements: slice_elements,
+                    });
+
+                    self.call_stack
+                        .current()
+                        .unwrap()
+                        .locals
+                        .insert(*result, Value::Ptr(new_ptr));
+                } else {
+                    return Err(InterpreterError::TypeError {
+                        expected: "array object for slicing",
+                        got: "non-array object".to_string(),
+                    });
                 }
             }
 

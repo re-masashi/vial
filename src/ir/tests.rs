@@ -566,3 +566,122 @@ fn test_builtin_types_memory_kind() {
     assert_eq!(option_type.memory_kind, MemoryKind::Heap);
     assert_eq!(result_type.memory_kind, MemoryKind::Heap);
 }
+
+#[test]
+fn test_array_spread_instruction() {
+    let instruction_metadata = InstructionMetadata {
+        memory_slot: Some(MemorySlotId(0)),
+        allocation_site: Some(AllocationId(1)),
+    };
+
+    let element_type = IRTypeWithMemory {
+        type_: IRType::Int,
+        memory_kind: MemoryKind::Stack,
+        span: 0..0,
+        file: String::new(),
+        allocation_id: None,
+    };
+
+    // Create an ArraySpread instruction
+    let array_spread_instruction = IRInstruction::ArraySpread {
+        result: ValueId(0),
+        metadata: instruction_metadata.clone(),
+        arrays: vec![IRValue::SSA(ValueId(1)), IRValue::SSA(ValueId(2))],
+        element_type: element_type.clone(),
+        span: 0..10,
+        file: "test.vi".to_string(),
+    };
+
+    // Verify its properties
+    match &array_spread_instruction {
+        IRInstruction::ArraySpread {
+            result,
+            metadata,
+            arrays,
+            element_type: elem_type,
+            span,
+            file,
+        } => {
+            assert_eq!(*result, ValueId(0));
+            assert_eq!(metadata, &instruction_metadata);
+            assert_eq!(arrays.len(), 2);
+            assert_eq!(elem_type.type_, IRType::Int);
+            assert_eq!(*span, 0..10);
+            assert_eq!(file, "test.vi");
+        }
+        _ => panic!("Expected ArraySpread instruction"),
+    }
+
+    // Test with empty arrays list
+    let empty_array_spread = IRInstruction::ArraySpread {
+        result: ValueId(1),
+        metadata: instruction_metadata,
+        arrays: vec![],
+        element_type,
+        span: 0..5,
+        file: "empty_test.vi".to_string(),
+    };
+
+    match &empty_array_spread {
+        IRInstruction::ArraySpread { arrays, .. } => {
+            assert_eq!(arrays.len(), 0);
+        }
+        _ => panic!("Expected ArraySpread instruction"),
+    }
+}
+
+#[test]
+fn test_array_vs_array_spread_instructions() {
+    // Create a regular Array instruction
+    let array_instruction = IRInstruction::Array {
+        result: ValueId(0),
+        metadata: InstructionMetadata {
+            memory_slot: Some(MemorySlotId(0)),
+            allocation_site: Some(AllocationId(1)),
+        },
+        elements: vec![IRValue::Int(1), IRValue::Int(2), IRValue::Int(3)],
+        element_type: IRTypeWithMemory {
+            type_: IRType::Int,
+            memory_kind: MemoryKind::Stack,
+            span: 0..0,
+            file: String::new(),
+            allocation_id: None,
+        },
+        span: 0..10,
+        file: "test.vi".to_string(),
+    };
+
+    // Create an ArraySpread instruction
+    let array_spread_instruction = IRInstruction::ArraySpread {
+        result: ValueId(1),
+        metadata: InstructionMetadata {
+            memory_slot: Some(MemorySlotId(1)),
+            allocation_site: Some(AllocationId(2)),
+        },
+        arrays: vec![IRValue::SSA(ValueId(10)), IRValue::SSA(ValueId(11))],
+        element_type: IRTypeWithMemory {
+            type_: IRType::Int,
+            memory_kind: MemoryKind::Stack,
+            span: 0..0,
+            file: String::new(),
+            allocation_id: None,
+        },
+        span: 0..15,
+        file: "test.vi".to_string(),
+    };
+
+    // Ensure they are different instruction types
+    match &array_instruction {
+        IRInstruction::Array { elements, .. } => {
+            assert_eq!(elements.len(), 3);
+        }
+        _ => panic!("Expected Array instruction"),
+    }
+
+    match &array_spread_instruction {
+        IRInstruction::ArraySpread { arrays, .. } => {
+            assert_eq!(arrays.len(), 2);
+        }
+        _ => panic!("Expected ArraySpread instruction"),
+    }
+}
