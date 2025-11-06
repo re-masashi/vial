@@ -70,10 +70,23 @@ impl Monomorphizer {
                     // because those should be processed normally (e.g., main function)
                     let has_explicit_type_params = !func.type_params.is_empty();
 
-                    if has_explicit_type_params {
-                        // This is a truly generic function - don't include it in output directly
+                    // Check if function has unresolved type variables (implicit polymorphism)
+                    let has_unresolved_type_vars =
+                        Self::has_unresolved_type_vars_in_function(&func);
+
+                    if has_explicit_type_params || has_unresolved_type_vars {
+                        println!(
+                            "does fun {:?} have type params? {}",
+                            func.name,
+                            !func.type_params.is_empty()
+                        );
+
+                        // This is a generic or implicitly polymorphic function - don't include it in output directly
+                        // It will be specialized when called
                         continue; // Don't add to result yet
                     } else {
+                        println!("func not being mono: {:?}", func.name);
+
                         // Non-generic function - keep it and monomorphize body
                         let mono_func = self.monomorphize_function_body(*func);
                         result.push(TypedASTNode {
@@ -163,6 +176,7 @@ impl Monomorphizer {
 
         // Add specialized functions
         for func in self.specialized_functions.drain(..) {
+            println!("function added to result: {:?}", func.name);
             result.push(TypedASTNode {
                 span: func.span.clone(),
                 file: func.file.clone(),
@@ -212,6 +226,49 @@ impl Monomorphizer {
         }
 
         result
+    }
+
+    fn has_unresolved_type_vars_in_function(func: &TypedFunction) -> bool {
+        // Check the function type for unresolved type variables
+        Self::has_unresolved_type_vars_in_type(&func.function_type)
+    }
+
+    fn has_unresolved_type_vars_in_type(ty: &Rc<Type>) -> bool {
+        match &ty.type_ {
+            TypeKind::Variable { .. } => true,
+            TypeKind::Constructor { args, .. } => {
+                args.iter().any(Self::has_unresolved_type_vars_in_type)
+            }
+            TypeKind::Function {
+                params,
+                return_type,
+                effects: _,
+            } => {
+                params.iter().any(Self::has_unresolved_type_vars_in_type)
+                    || Self::has_unresolved_type_vars_in_type(return_type)
+            }
+            TypeKind::Forall { body, .. } => {
+                // For Forall types, the type variables are bound, so check the body
+                Self::has_unresolved_type_vars_in_type(body)
+            }
+            TypeKind::Tuple(types) => types.iter().any(Self::has_unresolved_type_vars_in_type),
+            TypeKind::Union(types) => types.iter().any(Self::has_unresolved_type_vars_in_type),
+            TypeKind::Row { fields, rest: _ } => fields
+                .iter()
+                .any(|(_, t)| Self::has_unresolved_type_vars_in_type(t)),
+            TypeKind::Pointer(inner) => Self::has_unresolved_type_vars_in_type(inner),
+            TypeKind::Exists { body, .. } => Self::has_unresolved_type_vars_in_type(body),
+            TypeKind::Trait(types) => {
+                types.iter().any(|&_id| {
+                    // Check if this is a type variable in disguise
+                    // In our system, trait constraints contain type IDs, but to check for type variables
+                    // we'd need to look up the actual types - let's be conservative
+                    // For now, just return false as trait constraints shouldn't be type variables
+                    false
+                })
+            }
+            TypeKind::Never | TypeKind::Error => false,
+        }
     }
 
     fn monomorphize_function_body(&mut self, mut func: TypedFunction) -> TypedFunction {
@@ -352,15 +409,27 @@ impl Monomorphizer {
                     .map(|a| self.monomorphize_expr(a))
                     .collect();
 
-                if let TypedExprKind::Variable { binding_id, .. } = &function.expr {
+                if let TypedExprKind::Variable {
+                    name, binding_id, ..
+                } = &function.expr
+                {
                     let func_id = FunctionId(binding_id.0);
+                    println!("name of var: {:?}", name);
 
+                    // Try looking up by binding ID
                     if let Some(original_func) = self.functions.get(&func_id).cloned() {
+                        println!("binding id {:?}", func_id);
                         let type_vars = self.collect_type_vars_from_func(&original_func);
 
                         // Check if this function has type parameters or type variables that need monomorphization
                         let needs_monomorphization =
                             !type_vars.is_empty() || !original_func.type_params.is_empty();
+
+                        println!(
+                            "empty type params? {:?}",
+                            original_func.type_params.is_empty()
+                        );
+                        println!("mono needed? {:?}", needs_monomorphization);
 
                         if needs_monomorphization {
                             // Get concrete types from arguments
@@ -377,7 +446,14 @@ impl Monomorphizer {
                                     &mono_args,
                                 );
 
-                            let specialized_func = self.functions.get(&specialized_id).unwrap();
+                            // Make sure the specialized function exists in functions map
+                            let specialized_func =
+                                self.functions.get(&specialized_id).unwrap_or_else(|| {
+                                    panic!(
+                                        "Specialized function should exist: {:?}",
+                                        specialized_id
+                                    )
+                                });
                             let specialized_func_type = specialized_func.function_type.clone();
 
                             let return_type = match &specialized_func_type.type_ {
@@ -1011,7 +1087,7 @@ impl Monomorphizer {
                 // For builtin macros, resolve the return type to concrete types
                 let macro_name_str = self.interner.resolve(name);
                 let resolved_type = match macro_name_str {
-                    "println" | "print" | "println!" | "print!" => {
+                    "println" | "print" => {
                         // These macros return unit
                         Rc::new(Type {
                             span: expr.type_.span.clone(),
@@ -1023,7 +1099,7 @@ impl Monomorphizer {
                             },
                         })
                     }
-                    "input" | "input!" => {
+                    "input" => {
                         // input! returns string
                         Rc::new(Type {
                             span: expr.type_.span.clone(),
@@ -1035,7 +1111,7 @@ impl Monomorphizer {
                             },
                         })
                     }
-                    "typeof" | "typeof!" => {
+                    "typeof" => {
                         // typeof! returns string
                         Rc::new(Type {
                             span: expr.type_.span.clone(),
@@ -1403,42 +1479,42 @@ impl Monomorphizer {
         concrete_type_keys: &[String],
     ) -> Rc<Type> {
         // Convert type keys back to types. For now, we'll use a simple approach.
-        // In a real implementation, we would need to look up the concrete types from their keys.
+        // Would need to look up the concrete types from their keys.
         let args: Vec<Rc<Type>> = concrete_type_keys
             .iter()
             .map(|key| {
                 // We'll need to resolve the type from the key
                 // This is a simplified approach - in practice you'd have a mapping from string keys to types
                 match key.as_str() {
-                    "Int" => Rc::new(Type {
+                    "int" => Rc::new(Type {
                         span: None,
                         file: None,
                         type_: TypeKind::Constructor {
-                            name: self.interner.intern("Int").0,
+                            name: self.interner.intern("int").0,
                             args: vec![],
                             kind: Kind::Star,
                         },
                     }),
-                    "Bool" => Rc::new(Type {
+                    "bool" => Rc::new(Type {
                         span: None,
                         file: None,
                         type_: TypeKind::Constructor {
-                            name: self.interner.intern("Bool").0,
+                            name: self.interner.intern("bool").0,
                             args: vec![],
                             kind: Kind::Star,
                         },
                     }),
-                    "String" => Rc::new(Type {
+                    "string" => Rc::new(Type {
                         span: None,
                         file: None,
                         type_: TypeKind::Constructor {
-                            name: self.interner.intern("String").0,
+                            name: self.interner.intern("string").0,
                             args: vec![],
                             kind: Kind::Star,
                         },
                     }),
                     t if t.contains("<") => {
-                        // Handle nested types like List<Int>
+                        // Handle nested types like List<int>
                         let parts: Vec<&str> = t.split('<').collect();
                         if parts.len() >= 2 {
                             let base_name = parts[0];
@@ -1808,12 +1884,12 @@ impl Monomorphizer {
             TypedPatKind::Literal(lit) => TypedPatKind::Literal(lit.clone()),
 
             TypedPatKind::Array {
-                patterns,
+                elements,
                 element_type,
             } => TypedPatKind::Array {
-                patterns: patterns
+                elements: elements
                     .iter()
-                    .map(|p| self.substitute_pattern(p, subst))
+                    .map(|e| self.substitute_array_pattern_element(e, subst))
                     .collect(),
                 element_type: subst.apply(element_type),
             },
@@ -1897,6 +1973,22 @@ impl Monomorphizer {
         }
     }
 
+    #[allow(clippy::only_used_in_recursion)]
+    fn substitute_array_pattern_element(
+        &self,
+        element: &TypedArrayPatElement,
+        subst: &Substitution,
+    ) -> TypedArrayPatElement {
+        match element {
+            TypedArrayPatElement::Pattern(pattern) => {
+                TypedArrayPatElement::Pattern(self.substitute_pattern(pattern, subst))
+            }
+            TypedArrayPatElement::Spread(pattern) => {
+                TypedArrayPatElement::Spread(self.substitute_pattern(pattern, subst))
+            }
+        }
+    }
+
     fn monomorphize_pattern(&mut self, pat: TypedPattern) -> TypedPattern {
         // Apply substitution to the pattern's type
         let new_type = self.monomorphize_type(&pat.type_);
@@ -1906,12 +1998,12 @@ impl Monomorphizer {
             TypedPatKind::Bind { name, binding_id } => TypedPatKind::Bind { name, binding_id },
             TypedPatKind::Literal(lit) => TypedPatKind::Literal(lit),
             TypedPatKind::Array {
-                patterns,
+                elements,
                 element_type,
             } => TypedPatKind::Array {
-                patterns: patterns
+                elements: elements
                     .into_iter()
-                    .map(|p| self.monomorphize_pattern(p))
+                    .map(|e| self.monomorphize_array_pattern_element(e))
                     .collect(),
                 element_type: self.monomorphize_type(&element_type),
             },
@@ -1981,6 +2073,20 @@ impl Monomorphizer {
             file: pat.file,
             pat: new_pat,
             type_: new_type,
+        }
+    }
+
+    fn monomorphize_array_pattern_element(
+        &mut self,
+        element: TypedArrayPatElement,
+    ) -> TypedArrayPatElement {
+        match element {
+            TypedArrayPatElement::Pattern(pattern) => {
+                TypedArrayPatElement::Pattern(self.monomorphize_pattern(pattern))
+            }
+            TypedArrayPatElement::Spread(pattern) => {
+                TypedArrayPatElement::Spread(self.monomorphize_pattern(pattern))
+            }
         }
     }
 

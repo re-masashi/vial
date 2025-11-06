@@ -231,6 +231,10 @@ impl TargetInfo {
             let align = self.align_of(field_type, module)?;
 
             // Check if padding needed
+            // Handle the case where align is 0 (which indicates error in layout computation)
+            if align == 0 {
+                return None; // This indicates a circular dependency or unresolved type
+            }
             let aligned_offset = (offset + align - 1) & !(align - 1);
             if aligned_offset > offset {
                 padding_bytes.push(PaddingInfo {
@@ -329,7 +333,7 @@ impl IRModule {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IRTypeWithMemory {
     pub type_: IRType,
     pub span: Range<usize>,
@@ -338,7 +342,7 @@ pub struct IRTypeWithMemory {
     pub allocation_id: Option<AllocationId>, // For tracking allocations
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum IRType {
     // Primitives (typically stack allocated)
     Bool,
@@ -379,7 +383,7 @@ pub enum IRType {
 }
 
 // Instruction metadata for memory tracking
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct InstructionMetadata {
     pub memory_slot: Option<MemorySlotId>,
     pub allocation_site: Option<AllocationId>,
@@ -521,6 +525,16 @@ pub enum IRInstruction {
         file: String,
     },
 
+    // Array concatenation with spread (heap allocation)
+    ArraySpread {
+        result: ValueId,
+        metadata: InstructionMetadata,
+        arrays: Vec<IRValue>, // List of arrays to concatenate
+        element_type: IRTypeWithMemory,
+        span: Range<usize>,
+        file: String,
+    },
+
     // Tuple construction (stack or heap based on size/escape)
     Tuple {
         result: ValueId,
@@ -610,6 +624,18 @@ pub enum IRInstruction {
         metadata: InstructionMetadata,
         target: IRValue,
         index: IRValue,
+        element_type: IRTypeWithMemory,
+        span: Range<usize>,
+        file: String,
+    },
+
+    // Array slice operation - extracts elements from start index to end index (or end of array)
+    Slice {
+        result: ValueId,
+        metadata: InstructionMetadata,
+        array: IRValue,
+        start: IRValue,
+        end: Option<IRValue>, // None means slice to end of array
         element_type: IRTypeWithMemory,
         span: Range<usize>,
         file: String,

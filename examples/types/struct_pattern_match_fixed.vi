@@ -1,0 +1,21 @@
+// Test struct pattern matching - check the general case
+struct Point {
+    x: int,
+    y: int,
+}
+
+def test_pattern(p: Point) -> int {
+    match p {
+        Point { x: 0, y: 0 } => 0,      // origin
+        Point { x: 0, y: y_val } => y_val,      // on y-axis
+        Point { x: x_val, y: 0 } => x_val,      // on x-axis
+        Point { x: x_val, y: y_val } => x_val + y_val,  // general case
+    }
+}
+
+let origin = Point { x: 0, y: 0 };
+let on_x = Point { x: 5, y: 0 };
+let on_y = Point { x: 0, y: 3 };
+let general = Point { x: 2, y: 4 };
+
+test_pattern(origin) + test_pattern(on_x) + test_pattern(on_y) + test_pattern(general)

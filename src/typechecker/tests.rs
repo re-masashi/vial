@@ -12,7 +12,7 @@ fn dummy_span() -> std::ops::Range<usize> {
 }
 
 fn dummy_file() -> String {
-    "test.ni".to_string()
+    "test.vi".to_string()
 }
 
 // Basic Type Inference Tests
@@ -2990,7 +2990,7 @@ fn test_non_polymorphic_function_detection() {
                     span: None,
                     file: None,
                     type_: TypeKind::Constructor {
-                        name: monomorphizer.interner.intern("Int").0,
+                        name: monomorphizer.interner.intern("int").0,
                         args: vec![],
                         kind: Kind::Star,
                     },
@@ -3005,7 +3005,7 @@ fn test_non_polymorphic_function_detection() {
                     span: None,
                     file: None,
                     type_: TypeKind::Constructor {
-                        name: monomorphizer.interner.intern("Int").0,
+                        name: monomorphizer.interner.intern("int").0,
                         args: vec![],
                         kind: Kind::Star,
                     },
@@ -3016,7 +3016,7 @@ fn test_non_polymorphic_function_detection() {
             span: None,
             file: None,
             type_: TypeKind::Constructor {
-                name: monomorphizer.interner.intern("Int").0,
+                name: monomorphizer.interner.intern("int").0,
                 args: vec![],
                 kind: Kind::Star,
             },
@@ -3032,7 +3032,7 @@ fn test_non_polymorphic_function_detection() {
                         span: None,
                         file: None,
                         type_: TypeKind::Constructor {
-                            name: monomorphizer.interner.intern("Int").0,
+                            name: monomorphizer.interner.intern("int").0,
                             args: vec![],
                             kind: Kind::Star,
                         },
@@ -3041,7 +3041,7 @@ fn test_non_polymorphic_function_detection() {
                         span: None,
                         file: None,
                         type_: TypeKind::Constructor {
-                            name: monomorphizer.interner.intern("Int").0,
+                            name: monomorphizer.interner.intern("int").0,
                             args: vec![],
                             kind: Kind::Star,
                         },
@@ -3051,7 +3051,7 @@ fn test_non_polymorphic_function_detection() {
                     span: None,
                     file: None,
                     type_: TypeKind::Constructor {
-                        name: monomorphizer.interner.intern("Int").0,
+                        name: monomorphizer.interner.intern("int").0,
                         args: vec![],
                         kind: Kind::Star,
                     },
@@ -3074,7 +3074,7 @@ fn test_non_polymorphic_function_detection() {
                         span: None,
                         file: None,
                         type_: TypeKind::Constructor {
-                            name: monomorphizer.interner.intern("Int").0,
+                            name: monomorphizer.interner.intern("int").0,
                             args: vec![],
                             kind: Kind::Star,
                         },
@@ -3092,7 +3092,7 @@ fn test_non_polymorphic_function_detection() {
                         span: None,
                         file: None,
                         type_: TypeKind::Constructor {
-                            name: monomorphizer.interner.intern("Int").0,
+                            name: monomorphizer.interner.intern("int").0,
                             args: vec![],
                             kind: Kind::Star,
                         },
@@ -3103,7 +3103,7 @@ fn test_non_polymorphic_function_detection() {
                 span: None,
                 file: None,
                 type_: TypeKind::Constructor {
-                    name: monomorphizer.interner.intern("Int").0,
+                    name: monomorphizer.interner.intern("int").0,
                     args: vec![],
                     kind: Kind::Star,
                 },
@@ -3125,23 +3125,23 @@ fn test_make_specialized_name_generation() {
 
     // Test basic specialization name generation
     let base_name = monomorphizer.interner.intern("id");
-    let concrete_types = vec!["Int".to_string()];
+    let concrete_types = vec!["int".to_string()];
     let specialized_name = monomorphizer.make_specialized_name(base_name, &concrete_types);
 
     let resolved_name = monomorphizer.interner.resolve(specialized_name);
     assert!(resolved_name.starts_with("id$"));
-    assert!(resolved_name.contains("Int"));
+    assert!(resolved_name.contains("int"));
 
     // Test complex specialization name generation
     let base_name2 = monomorphizer.interner.intern("map");
-    let concrete_types2 = vec!["List".to_string(), "Int".to_string(), "String".to_string()];
+    let concrete_types2 = vec!["List".to_string(), "int".to_string(), "string".to_string()];
     let specialized_name2 = monomorphizer.make_specialized_name(base_name2, &concrete_types2);
 
     let resolved_name2 = monomorphizer.interner.resolve(specialized_name2);
     assert!(resolved_name2.starts_with("map$"));
     assert!(resolved_name2.contains("List"));
-    assert!(resolved_name2.contains("Int"));
-    assert!(resolved_name2.contains("String"));
+    assert!(resolved_name2.contains("int"));
+    assert!(resolved_name2.contains("string"));
 }
 
 // Test for error_type function
@@ -4410,7 +4410,7 @@ fn test_builtin_print_macro_type_checking() {
         span: dummy_span(),
         file: dummy_file(),
         expr: ExprKind::MacroCall(
-            "print!".to_string(),
+            "print".to_string(),
             vec![Expr {
                 span: dummy_span(),
                 file: dummy_file(),
@@ -4441,7 +4441,7 @@ fn test_builtin_println_macro_type_checking() {
         span: dummy_span(),
         file: dummy_file(),
         expr: ExprKind::MacroCall(
-            "println!".to_string(),
+            "println".to_string(),
             vec![
                 Expr {
                     span: dummy_span(),
@@ -4479,7 +4479,7 @@ fn test_builtin_typeof_macro_type_checking() {
         span: dummy_span(),
         file: dummy_file(),
         expr: ExprKind::MacroCall(
-            "typeof!".to_string(),
+            "typeof".to_string(),
             vec![Expr {
                 span: dummy_span(),
                 file: dummy_file(),
@@ -4505,11 +4505,19 @@ fn test_builtin_typeof_macro_type_checking() {
 fn test_builtin_input_macro_type_checking() {
     let mut tc = setup();
 
-    // Test input! macro with no arguments
+    // Test input! macro with one argument (prompt string)
     let input_macro = Expr {
         span: dummy_span(),
         file: dummy_file(),
-        expr: ExprKind::MacroCall("input!".to_string(), vec![], crate::ast::Delimiter::Paren),
+        expr: ExprKind::MacroCall(
+            "input".to_string(),
+            vec![Expr {
+                span: dummy_span(),
+                file: dummy_file(),
+                expr: ExprKind::String("Enter value: ".to_string()),
+            }],
+            crate::ast::Delimiter::Paren,
+        ),
     };
 
     let typed = tc.check_expr(&input_macro);
@@ -4533,7 +4541,7 @@ fn test_builtin_macro_wrong_arity() {
         span: dummy_span(),
         file: dummy_file(),
         expr: ExprKind::MacroCall(
-            "typeof!".to_string(),
+            "typeof".to_string(),
             vec![
                 Expr {
                     span: dummy_span(),
@@ -4568,22 +4576,43 @@ fn test_builtin_macro_wrong_arity() {
 fn test_builtin_input_macro_wrong_args() {
     let mut tc = setup();
 
-    // Test input! with arguments (should be none)
+    // Test input! with no arguments (should fail)
     let input_macro = Expr {
         span: dummy_span(),
         file: dummy_file(),
         expr: ExprKind::MacroCall(
-            "input!".to_string(),
-            vec![Expr {
-                span: dummy_span(),
-                file: dummy_file(),
-                expr: ExprKind::Int(42),
-            }],
+            "input".to_string(),
+            vec![], // No arguments - should fail
             crate::ast::Delimiter::Paren,
         ),
     };
 
     let _typed = tc.check_expr(&input_macro);
+    assert!(tc.diagnostics.has_errors());
+
+    // Test input! with too many arguments (should fail)
+    let input_macro2 = Expr {
+        span: dummy_span(),
+        file: dummy_file(),
+        expr: ExprKind::MacroCall(
+            "input".to_string(),
+            vec![
+                Expr {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    expr: ExprKind::String("prompt1".to_string()),
+                },
+                Expr {
+                    span: dummy_span(),
+                    file: dummy_file(),
+                    expr: ExprKind::String("prompt2".to_string()),
+                },
+            ], // Two arguments - should fail
+            crate::ast::Delimiter::Paren,
+        ),
+    };
+
+    let _typed2 = tc.check_expr(&input_macro2);
     assert!(tc.diagnostics.has_errors());
 
     // Should have an arity mismatch error

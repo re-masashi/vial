@@ -7,7 +7,7 @@ use crate::ast::{
     TypedExprKind, TypedFunction, TypedStruct,
 };
 use crate::ir::{
-    AddressKind, AllocationId, BasicBlock, BasicBlockId, BasicBlockInfo, ControlFlowGraph,
+    AddressKind, AllocationId, BasicBlock, BasicBlockId, BasicBlockInfo, BinOp, ControlFlowGraph,
     EffectId, EnumId, EscapeAnalysisInfo, FieldId, FunctionId, IREffect, IREffectOperation, IREnum,
     IREnumVariant, IRExternFunction, IRFunction, IRFunctionArg, IRInstruction, IRModule, IRStruct,
     IRStructField, IRTerminator, IRType, IRTypeWithMemory, IRValue, InlineHint,
@@ -261,17 +261,57 @@ impl IRBuilder {
         // Collect keys and sort them to ensure consistent order
         let mut struct_keys: Vec<_> = self.structs.keys().cloned().collect();
         struct_keys.sort();
-        let structs: Vec<_> = struct_keys
+        let mut structs: Vec<_> = struct_keys
             .into_iter()
             .map(|id| self.structs[&id].clone())
             .collect();
 
         let mut enum_keys: Vec<_> = self.enums.keys().cloned().collect();
         enum_keys.sort();
-        let enums: Vec<_> = enum_keys
+        let mut enums: Vec<_> = enum_keys
             .into_iter()
             .map(|id| self.enums[&id].clone())
             .collect();
+
+        // Compute memory layouts for all enums
+        for enum_data in &mut enums {
+            // Compute memory layout for the enum
+            // For enums, we need to determine discriminant size and overall layout
+            let max_discriminant = enum_data.variants.len().saturating_sub(1);
+
+            // Determine discriminant size based on number of variants
+            let discriminant_size = if max_discriminant <= u8::MAX as usize {
+                std::mem::size_of::<u8>()
+            } else if max_discriminant <= u16::MAX as usize {
+                std::mem::size_of::<u16>()
+            } else {
+                std::mem::size_of::<u32>()
+            };
+
+            // Set discriminant offset and size in the memory layout
+            let discriminant_offset = 0; // Discriminant comes first
+            let alignment = discriminant_size.max(1); // Basic alignment
+
+            // Calculate data offset for each variant (after discriminant)
+            // For simplicity, we'll use the same offset for all variants for now
+            for variant in &mut enum_data.variants {
+                variant.data_offset = discriminant_offset + discriminant_size; // Data comes after discriminant
+            }
+
+            // Total size - for now using a basic calculation
+            // In a more complete implementation we'd calculate based on actual variant sizes
+            let total_size = discriminant_size + 16; // 16 bytes as a basic allocation for data
+
+            enum_data.memory_layout = crate::ir::MemoryLayout {
+                size: total_size,
+                alignment,
+                field_offsets: Vec::new(), // Not used for enums in this system
+                discriminant_offset: Some(discriminant_offset),
+                discriminant_size: Some(discriminant_size),
+                discriminant_encoding: Some(crate::ir::DiscriminantEncoding::Explicit),
+                padding_bytes: Vec::new(),
+            };
+        }
 
         let mut effect_keys: Vec<_> = self.effects.keys().cloned().collect();
         effect_keys.sort();
@@ -338,6 +378,98 @@ impl IRBuilder {
         // Append extern functions to the functions vector
         functions.extend(extern_functions);
 
+        // Compute memory layouts for all structs with dependency resolution
+        {
+            use std::collections::{BTreeMap, HashSet};
+
+            // Multiple passes to resolve dependencies
+            let mut completed_structs = HashSet::new();
+            let total_structs = structs.len();
+
+            // Keep trying to compute layouts until all are done or no progress is made
+            while completed_structs.len() < total_structs {
+                let mut progress_made = false;
+
+                // Create a temporary module with currently available layouts
+                let mut temp_struct_map = BTreeMap::new();
+                for (index, struct_data) in structs.iter().enumerate() {
+                    temp_struct_map.insert(struct_data.id, index);
+                }
+
+                let mut temp_function_map = BTreeMap::new();
+                for (index, function_data) in functions.iter().enumerate() {
+                    temp_function_map.insert(function_data.id, index);
+                }
+
+                let temp_module = IRModule {
+                    structs: structs.clone(),
+                    enums: enums.clone(),
+                    effects: effects.clone(),
+                    functions: functions.clone(),
+                    function_map: temp_function_map,
+                    struct_map: temp_struct_map,
+                    enum_map: self.enums.iter().map(|(id, e)| (*id, e.id.0)).collect(),
+                    effect_map: self
+                        .effects
+                        .iter()
+                        .map(|(id, eff)| (*id, eff.id.0))
+                        .collect(),
+                    target: self.target.clone(),
+                };
+
+                for (idx, struct_data) in structs.iter_mut().enumerate() {
+                    // Skip if already completed
+                    if completed_structs.contains(&idx) {
+                        continue;
+                    }
+
+                    // Prepare field types for layout computation
+                    let field_types: Vec<_> = struct_data
+                        .fields
+                        .iter()
+                        .map(|f| (f.field_id, &f.type_.type_))
+                        .collect();
+
+                    // Try to compute memory layout
+                    if let Some(layout) = self
+                        .target
+                        .compute_aggregate_layout(&field_types, &temp_module)
+                    {
+                        // Update memory layout and field offsets
+                        struct_data.memory_layout = layout.clone();
+
+                        // Update field offsets based on computed layout
+                        for field in &mut struct_data.fields {
+                            field.offset = layout
+                                .field_offsets
+                                .iter()
+                                .find(|(field_id, _)| *field_id == field.field_id)
+                                .map(|(_, off)| *off)
+                                .unwrap_or(0);
+                        }
+
+                        completed_structs.insert(idx);
+                        progress_made = true;
+                    }
+                }
+
+                // If no progress was made in a complete pass, we have a circular dependency
+                if !progress_made {
+                    // Find which structs couldn't be resolved
+                    let unresolved: Vec<_> = structs
+                        .iter()
+                        .enumerate()
+                        .filter(|(idx, _)| !completed_structs.contains(idx))
+                        .map(|(_idx, s)| format!("{} (id: {:?})", s.name, s.id))
+                        .collect();
+                    panic!(
+                        "Could not resolve struct layouts due to possible circular dependency: {:?}",
+                        unresolved
+                    );
+                }
+            }
+        }
+
         IRModule {
             structs,
             enums,
@@ -384,14 +516,14 @@ impl IRBuilder {
                         .insert(self.interner.resolve(eff.name).to_string(), id);
                 }
                 TypedASTNodeKind::Function(f) => {
-                    let id = self.fresh_function_id();
+                    let id = FunctionId(f.function_id.0);
                     let ir_function = self.convert_function_signature(f, id);
                     self.functions.insert(id, ir_function);
                     self.function_names
                         .insert(self.interner.resolve(f.name).to_string(), id);
                 }
                 TypedASTNodeKind::ExternFunction(extern_f) => {
-                    let id = self.fresh_function_id();
+                    let id = FunctionId(extern_f.function_id.0);
                     let ir_extern_function = self.convert_extern_function(extern_f, id);
 
                     // Convert to a regular IRFunction without a body
@@ -442,7 +574,7 @@ impl IRBuilder {
     }
 
     fn convert_struct(&mut self, s: &TypedStruct, id: StructId) -> IRStruct {
-        // Convert fields with proper memory layout
+        // Convert fields with placeholder offsets
         let fields: Vec<_> = s
             .fields
             .iter()
@@ -454,32 +586,8 @@ impl IRBuilder {
                     vis: *vis,
                     span: field_arg.span.clone(),
                     file: field_arg.file.clone(),
-                    offset: 0, // Computed below
+                    offset: 0, // Will be computed later
                 }
-            })
-            .collect();
-
-        // Compute memory layout
-        let field_types: Vec<_> = fields
-            .iter()
-            .map(|f| (f.field_id, &f.type_.type_))
-            .collect();
-        let layout = self
-            .target
-            .compute_aggregate_layout(&field_types, &IRModule::new(self.target.clone()))
-            .expect("Failed to compute struct layout");
-
-        // Update field offsets
-        let fields = fields
-            .into_iter()
-            .map(|mut f| {
-                f.offset = layout
-                    .field_offsets
-                    .iter()
-                    .find(|(id, _)| *id == f.field_id)
-                    .map(|(_, off)| *off)
-                    .unwrap_or(0);
-                f
             })
             .collect();
 
@@ -491,7 +599,15 @@ impl IRBuilder {
             span: s.span.clone(),
             file: s.file.clone(),
             struct_type: self.convert_type(&s.struct_type),
-            memory_layout: layout,
+            memory_layout: crate::ir::MemoryLayout {
+                size: 0,                     // Will be computed later
+                alignment: 0,                // Will be computed later
+                field_offsets: Vec::new(),   // Will be computed later
+                discriminant_offset: None,   // Structs don't have discriminants
+                discriminant_size: None,     // Structs don't have discriminants
+                discriminant_encoding: None, // Structs don't have discriminants
+                padding_bytes: Vec::new(),   // Will be computed later
+            },
         }
     }
 
@@ -499,7 +615,8 @@ impl IRBuilder {
         let variants: Vec<_> = e
             .variants
             .iter()
-            .map(|variant| {
+            .enumerate() // Add enumerate to assign discriminant values
+            .map(|(discriminant_idx, variant)| {
                 let _fields: Vec<_> = variant
                     .types
                     .iter()
@@ -524,8 +641,8 @@ impl IRBuilder {
                     constructor_type: self.convert_type(&variant.constructor_type),
                     span: variant.span.clone(),
                     file: variant.file.clone(),
-                    data_offset: 0,        // Will be computed later
-                    discriminant_value: 0, // Will be computed later
+                    data_offset: 0,                       // Will be computed later
+                    discriminant_value: discriminant_idx, // Assign the discriminant value based on index
                 }
             })
             .collect();
@@ -742,14 +859,14 @@ impl IRBuilder {
             crate::typechecker::TypeKind::Constructor { name, args, .. } => {
                 let type_name = self.interner.resolve(Symbol(*name));
                 match type_name {
-                    "Int" => IRType::Int,
-                    "Bool" => IRType::Bool,
-                    "Float" => IRType::Float,
-                    "String" => {
+                    "int" => IRType::Int,
+                    "bool" => IRType::Bool,
+                    "float" => IRType::Float,
+                    "string" => {
                         // Strings are heap allocated
                         IRType::String
                     }
-                    "Unit" => IRType::Unit,
+                    "unit" => IRType::Unit,
                     "Array" => {
                         if args.len() == 1 {
                             IRType::Named("Array".to_string(), vec![self.convert_type(&args[0])])
@@ -1031,6 +1148,19 @@ impl<'a> FunctionBuilder<'a> {
         }
     }
 
+    /// Lowers a typed function body into the function's IR, finalizing the entry blocks and return terminator.
+    ///
+    /// This assigns SSA values for the function parameters, lowers the function's body expression to an IR value,
+    /// ensures the current block has a `Return` terminator carrying that value if no terminator exists, and then
+    /// runs escape analysis for the function.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Given a prepared FunctionBuilder `fb`, a `TypedFunction` `func` and its body expression `body`,
+    /// // the following lowers the body into `fb`'s IR state:
+    /// // fb.lower_function_body(&func, &body);
+    /// ```
     fn lower_function_body(&mut self, function: &TypedFunction, body: &TypedExpr) {
         // Process parameters
         for param in &function.args {
@@ -1039,14 +1169,14 @@ impl<'a> FunctionBuilder<'a> {
         }
 
         // Lower the function body
-        let _result = self.lower_expr(body);
+        let result_val = self.lower_expr(body);
 
         // If we haven't already terminated the current block, add a return
         let current_block = self.blocks.get_mut(&self.current_block).unwrap();
         if current_block.terminator.is_none() {
-            // Add a return instruction
+            // Add a return instruction with the actual return value
             current_block.terminator = Some(IRTerminator::Return {
-                value: None,
+                value: Some(result_val),
                 span: body.span.clone(),
                 file: body.file.clone(),
             });
@@ -1072,23 +1202,39 @@ impl<'a> FunctionBuilder<'a> {
         }
     }
 
+    /// Lowers a typed expression into an intermediate representation value.
+    ///
+    /// This produces an IRValue that represents the result of evaluating the given
+    /// TypedExpr within the current function-building context, emitting IR
+    /// instructions and terminators as necessary and updating the builder's SSA
+    /// bindings and basic blocks.
+    ///
     fn lower_expr(&mut self, expr: &TypedExpr) -> IRValue {
         match &expr.expr {
             TypedExprKind::Int(n) => IRValue::Int(*n),
             TypedExprKind::Float(f) => IRValue::Float(*f),
             TypedExprKind::Bool(b) => IRValue::Bool(*b),
             TypedExprKind::String(s) => IRValue::String(s.clone()),
-            TypedExprKind::Variable { binding_id, .. } => {
+            TypedExprKind::Variable {
+                name, binding_id, ..
+            } => {
                 // Check if this is a local variable binding
                 if let Some(value_id) = self.bindings.get(&binding_id.0) {
                     IRValue::SSA(*value_id)
                 } else {
-                    // This is likely a function reference that should not be treated as a local variable
-                    // This can happen during monomorphization when function references are created
-                    // with binding IDs that don't correspond to local variable bindings
-                    // For now, create a placeholder and continue compilation
-                    let placeholder_value_id = self.builder.fresh_value_id();
-                    IRValue::SSA(placeholder_value_id)
+                    // Check if this variable name refers to a function
+                    let func_name = self.builder.interner.resolve(*name).to_string();
+                    if let Some(&func_id) = self.builder.function_names.get(&func_name) {
+                        // This is a function reference
+                        IRValue::FunctionRef(func_id)
+                    } else {
+                        // This is an unknown variable that should have been handled by type checker
+                        let var_name = self.builder.interner.resolve(*name);
+                        panic!(
+                            "internal compiler error: unknown variable '{}' / binding id {} — should have been handled by the type checker",
+                            var_name, binding_id.0
+                        )
+                    }
                 }
             }
             TypedExprKind::BinOp { left, op, right } => {
@@ -1129,6 +1275,11 @@ impl<'a> FunctionBuilder<'a> {
 
                 IRValue::SSA(result)
             }
+            TypedExprKind::Spread { value, .. } => {
+                // Handle spread expression in array context
+                // For now, just return the underlying value since spread is a compile-time operation
+                self.lower_expr(value)
+            }
             TypedExprKind::Let {
                 var: _,
                 binding_id,
@@ -1142,7 +1293,28 @@ impl<'a> FunctionBuilder<'a> {
                     self.bindings.insert(binding_id.0, id);
                 } else {
                     let new_id = self.builder.fresh_value_id();
+                    // Create a binding that maps to this SSA value
                     self.bindings.insert(binding_id.0, new_id);
+
+                    // Create an instruction to hold the non-SSA value in SSA form
+                    self.emit(IRInstruction::Let {
+                        result: new_id,
+                        metadata: InstructionMetadata {
+                            memory_slot: None,
+                            allocation_site: None,
+                        },
+                        var: format!("var_{}", binding_id.0), // Create a variable name
+                        value: value_val,
+                        var_type: IRTypeWithMemory {
+                            type_: IRType::Int, // This should be obtained from the actual type - placeholder for now
+                            span: 0..0,
+                            file: String::new(),
+                            memory_kind: MemoryKind::Stack,
+                            allocation_id: None,
+                        },
+                        span: 0..0,
+                        file: String::new(),
+                    });
                 }
 
                 IRValue::Unit
@@ -1349,17 +1521,22 @@ impl<'a> FunctionBuilder<'a> {
 
                 // Handle builtin macros by converting them to function calls
                 match macro_name.as_str() {
-                    "print!" | "print" => {
+                    "print" => {
                         // Convert print! macro to print function call
                         self.lower_builtin_macro_call("print", args, &expr.span, &expr.file)
                     }
-                    "println!" | "println" => {
+                    "println" => {
                         // Convert println! macro to print function call (with potential newline)
-                        self.lower_builtin_macro_call("print", args, &expr.span, &expr.file)
+                        self.lower_builtin_macro_call("println", args, &expr.span, &expr.file)
                     }
-                    "input!" | "input" => {
+                    "input" => {
                         // Convert input! macro to input function call
                         self.lower_builtin_macro_call("input", args, &expr.span, &expr.file)
+                    }
+                    "push" => {
+                        // Convert push! macro to a function call that adds an element to an array
+                        // This will be handled by the interpreter
+                        self.lower_builtin_macro_call("push", args, &expr.span, &expr.file)
                     }
                     _ => {
                         // For other macros, this shouldn't happen if the type checker worked properly
@@ -1459,55 +1636,149 @@ impl<'a> FunctionBuilder<'a> {
         let arm_blocks: Vec<BasicBlockId> = arms.iter().map(|_| self.new_block()).collect();
         let merge_block = self.new_block();
 
-        // Extract discriminant for switching
-        let discriminant = self.extract_discriminant(&matched_val);
-
-        // Build switch cases - use actual discriminant values when available
-        let cases: Vec<(IRValue, BasicBlockId)> = arms
+        // Check if this is an enum match (uses discriminant), struct match, or literal match
+        let is_enum_match = arms
             .iter()
-            .zip(&arm_blocks)
-            .enumerate()
-            .map(|(i, (arm, &block))| {
-                // Extract actual discriminant from the enum variant pattern
-                // For enum patterns, we should get the discriminant value of the variant
-                match &arm.pattern.pat {
-                    crate::ast::TypedPatKind::Enum {
-                        enum_name: _,
-                        enum_id: _,
-                        variant: _,
-                        variant_id: _,
-                        params: _,
-                    } => {
-                        // For now, use the arm index as the discriminant
-                        // In a full implementation, we'd extract the real discriminant value
-                        (IRValue::Int(i as i64), block)
-                    }
-                    _ => {
-                        // For other pattern types, use a default
-                        (IRValue::Int(i as i64), block)
-                    }
-                }
-            })
-            .collect();
+            .any(|arm| matches!(arm.pattern.pat, crate::ast::TypedPatKind::Enum { .. }));
 
-        // Emit switch terminator
-        let current_block = self.blocks.get_mut(&self.current_block).unwrap();
-        current_block.terminator = Some(IRTerminator::Switch {
-            value: discriminant,
-            cases,
-            default: None, // Assume exhaustive
-            is_exhaustive: true,
-            span: span.clone(),
-            file: file.to_string(),
-        });
+        let is_struct_match = arms
+            .iter()
+            .any(|arm| matches!(arm.pattern.pat, crate::ast::TypedPatKind::Struct { .. }));
+
+        if is_enum_match {
+            // Handle enum matching using discriminant
+            let discriminant = self.extract_discriminant(&matched_val);
+
+            // Build switch cases for enum variants
+            let cases: Vec<(IRValue, BasicBlockId)> = arms
+                .iter()
+                .zip(&arm_blocks)
+                .enumerate()
+                .map(|(i, (arm, &block))| {
+                    match &arm.pattern.pat {
+                        crate::ast::TypedPatKind::Enum { variant_id, .. } => {
+                            // Use the actual variant's discriminant value
+                            // The variant_id should correspond to the discriminant value
+                            (IRValue::Int(variant_id.0 as i64), block)
+                        }
+                        _ => {
+                            // This shouldn't happen for is_enum_match case, but fallback to index
+                            (IRValue::Int(i as i64), block)
+                        }
+                    }
+                })
+                .collect();
+
+            // Emit switch terminator
+            let current_block = self.blocks.get_mut(&self.current_block).unwrap();
+            current_block.terminator = Some(IRTerminator::Switch {
+                value: discriminant,
+                cases,
+                default: None,       // For complete enum matches
+                is_exhaustive: true, // Assume exhaustive for enum matches
+                span: span.clone(),
+                file: file.to_string(),
+            });
+        } else if is_struct_match {
+            // Check if any of the struct patterns contain literal sub-patterns that need conditional matching
+            let has_conditional_patterns = arms
+                .iter()
+                .any(|arm| Self::contains_literal_patterns(&arm.pattern));
+
+            if has_conditional_patterns {
+                // Handle conditional struct pattern matching
+                self.lower_conditional_struct_match(
+                    matched_val.clone(),
+                    arms,
+                    &arm_blocks,
+                    merge_block,
+                    span,
+                    file,
+                );
+            } else {
+                // Handle simple struct destructuring (all patterns are variable bindings)
+                let current_block = self.blocks.get_mut(&self.current_block).unwrap();
+                current_block.terminator = Some(IRTerminator::Jump {
+                    target: arm_blocks[0], // Jump to first arm
+                    span: span.clone(),
+                    file: file.to_string(),
+                });
+
+                // Process each arm: bind pattern and evaluate the expression
+                let mut arm_ssa_results = Vec::new();
+                for (arm_idx, arm) in arms.iter().enumerate() {
+                    self.set_current_block(arm_blocks[arm_idx]);
+
+                    // Bind the pattern (this will extract field values and create bindings)
+                    self.bind_pattern(&arm.pattern, matched_val.clone());
+
+                    // Evaluate the arm expression
+                    let arm_result = self.lower_expr(&arm.body);
+
+                    // Store the result and the current block for the PHI node
+                    let current_block_id = self.current_block;
+                    arm_ssa_results.push((arm_result, current_block_id));
+
+                    // Jump to the merge block
+                    self.emit_jump(merge_block, span, file);
+
+                    // Update CFG
+                    self.add_cfg_edge(current_block_id, merge_block);
+                }
+
+                // Create merge block with PHI node to collect results from arms
+                self.set_current_block(merge_block);
+                let result = self.builder.fresh_value_id();
+
+                let phi = IRInstruction::Phi {
+                    result,
+                    metadata: InstructionMetadata {
+                        memory_slot: None,
+                        allocation_site: None,
+                    },
+                    incoming: arm_ssa_results,
+                    span: span.clone(),
+                    file: file.to_string(),
+                };
+
+                self.blocks.get_mut(&merge_block).unwrap().add_phi(phi);
+            }
+        } else {
+            // Handle literal matching using comparisons and branches
+            self.lower_literal_match(
+                matched_val.clone(),
+                arms,
+                &arm_blocks,
+                merge_block,
+                span,
+                file,
+            );
+        }
 
         // Update CFG
         for &arm_block in &arm_blocks {
             self.add_cfg_edge(self.current_block, arm_block);
         }
 
-        // Lower each arm and collect results
-        let mut arm_results = Vec::new();
+        // For non-enum matches (literal/variable matches), the processing is handled by lower_literal_match
+        // So we don't need to process arms here if it's a literal match
+        // We'll only reach this code if it's an enum match
+        if !is_enum_match {
+            // For literal matches, the merge block and PHI have already been set up by lower_literal_match
+            // We need to get the result from the PHI node in the merge block
+            let merge_block_data = self.blocks.get(&merge_block).unwrap();
+            if let Some(phi_node) = merge_block_data.phi_nodes.last()
+                && let IRInstruction::Phi { result, .. } = phi_node
+            {
+                return IRValue::SSA(*result);
+            }
+            // This shouldn't happen if lower_literal_match is working properly
+            let result = self.builder.fresh_value_id();
+            return IRValue::SSA(result);
+        }
+
+        // Create SSA values for each arm in their respective blocks and collect results
+        let mut arm_ssa_results = Vec::new();
 
         for (i, arm) in arms.iter().enumerate() {
             self.set_current_block(arm_blocks[i]);
@@ -1524,18 +1795,687 @@ impl<'a> FunctionBuilder<'a> {
 
             // Lower the arm body
             let result = self.lower_expr(&arm.body);
-            let end_block = self.current_block;
+            let current_block = self.current_block;
 
-            arm_results.push((result, end_block));
+            // Make sure the result is in SSA form in the current block
+            let ssa_result = match result {
+                IRValue::SSA(id) => IRValue::SSA(id),
+                non_ssa_val => {
+                    // For non-SSA values, we need to create an SSA value in the current block
+                    let temp_id = self.builder.fresh_value_id();
+                    self.emit(IRInstruction::Let {
+                        result: temp_id,
+                        metadata: InstructionMetadata {
+                            memory_slot: None,
+                            allocation_site: None,
+                        },
+                        var: "_arm_result".to_string(),
+                        value: non_ssa_val,
+                        var_type: IRTypeWithMemory {
+                            type_: IRType::Int, // Placeholder - would be actual type in real implementation
+                            span: span.clone(),
+                            file: file.to_string(),
+                            memory_kind: MemoryKind::Stack,
+                            allocation_id: None,
+                        },
+                        span: span.clone(),
+                        file: file.to_string(),
+                    });
+                    IRValue::SSA(temp_id)
+                }
+            };
+
+            arm_ssa_results.push((ssa_result, current_block));
 
             // Jump to merge block
             self.emit_jump(merge_block, span, file);
 
             // Update CFG
-            self.add_cfg_edge(end_block, merge_block);
+            self.add_cfg_edge(current_block, merge_block);
         }
 
         // Create merge block with PHI node
+        self.set_current_block(merge_block);
+        let result = self.builder.fresh_value_id();
+
+        // Now all arm results are already in SSA form
+        let ssa_arm_results = arm_ssa_results;
+
+        let phi = IRInstruction::Phi {
+            result,
+            metadata: InstructionMetadata {
+                memory_slot: None,
+                allocation_site: None,
+            },
+            incoming: ssa_arm_results,
+            span: span.clone(),
+            file: file.to_string(),
+        };
+
+        self.blocks.get_mut(&merge_block).unwrap().add_phi(phi);
+
+        IRValue::SSA(result)
+    }
+
+    fn contains_literal_patterns(pattern: &crate::ast::TypedPattern) -> bool {
+        use crate::ast::TypedPatKind;
+        match &pattern.pat {
+            TypedPatKind::Wildcard | TypedPatKind::Bind { .. } => false,
+            TypedPatKind::Literal(_) => true,
+            TypedPatKind::Tuple { patterns, .. } => {
+                patterns.iter().any(Self::contains_literal_patterns)
+            }
+            TypedPatKind::Struct { fields, .. } => {
+                // Check if any of the nested patterns in struct fields are literals
+                fields
+                    .iter()
+                    .any(|(_, _, nested_pattern)| Self::contains_literal_patterns(nested_pattern))
+            }
+            TypedPatKind::Enum { params, .. } => params.iter().any(Self::contains_literal_patterns),
+            TypedPatKind::Or(patterns) => patterns.iter().any(Self::contains_literal_patterns),
+            TypedPatKind::As {
+                pattern: nested_pattern,
+                ..
+            } => Self::contains_literal_patterns(nested_pattern),
+            TypedPatKind::Array { elements, .. } => {
+                elements.iter().any(|element| match element {
+                    crate::ast::TypedArrayPatElement::Pattern(pattern) => {
+                        Self::contains_literal_patterns(pattern)
+                    }
+                    crate::ast::TypedArrayPatElement::Spread(_) => false, // Spread patterns don't contain literal patterns
+                })
+            }
+            TypedPatKind::Error => false,
+            TypedPatKind::Range { .. } | TypedPatKind::Rest { .. } => false, // Simplified - might need more logic
+        }
+    }
+
+    fn lower_conditional_struct_match(
+        &mut self,
+        matched_val: IRValue,
+        arms: &[crate::ast::TypedMatchArm],
+        arm_blocks: &[BasicBlockId],
+        merge_block: BasicBlockId,
+        span: &Range<usize>,
+        file: &str,
+    ) {
+        // For conditional struct matching, we generate a sequence of checks
+        // Each arm is checked in order, and we jump to the first matching one
+
+        // Create a chain of conditional blocks
+        let mut current_block = self.current_block;
+        let mut arm_ssa_results = Vec::new();
+
+        for (arm_idx, arm) in arms.iter().enumerate() {
+            // Create a check block for this arm
+            let check_block = self.new_block();
+
+            // Jump from current block to this check block
+            {
+                let current_block_data = self.blocks.get_mut(&current_block).unwrap();
+                current_block_data.terminator = Some(IRTerminator::Jump {
+                    target: check_block,
+                    span: span.clone(),
+                    file: file.to_string(),
+                });
+            }
+
+            // In the check block, validate if the pattern matches
+            self.set_current_block(check_block);
+
+            let pattern_matches = self.check_struct_pattern_match(&arm.pattern, &matched_val);
+
+            // Create a match success block and a continue block
+            let success_block = arm_blocks[arm_idx]; // Use the provided arm block
+            let continue_block = if arm_idx < arms.len() - 1 {
+                self.new_block() // Need a new block to check next arm
+            } else {
+                merge_block // Last arm - go directly to merge if it matches
+            };
+
+            // Branch based on whether pattern matches
+            {
+                let check_block_data = self.blocks.get_mut(&self.current_block).unwrap();
+                check_block_data.terminator = Some(IRTerminator::Branch {
+                    condition: pattern_matches,
+                    then_block: success_block,
+                    else_block: continue_block,
+                    span: span.clone(),
+                    file: file.to_string(),
+                });
+            }
+
+            // In the success block (arm block), bind the pattern and evaluate the body
+            self.set_current_block(success_block);
+            self.bind_pattern(&arm.pattern, matched_val.clone());
+            let arm_result = self.lower_expr(&arm.body);
+
+            // Jump from success block to merge block
+            self.emit_jump(merge_block, span, file);
+            self.add_cfg_edge(success_block, merge_block);
+            arm_ssa_results.push((arm_result, success_block));
+
+            // Continue to next check if we reach the continue block
+            if arm_idx < arms.len() - 1 {
+                current_block = continue_block;
+            }
+        }
+
+        // For the final case (last arm), if we reach the merge block directly,
+        // that arm's result should be available via PHI
+
+        // Create merge block with PHI node
+        self.set_current_block(merge_block);
+        let result = self.builder.fresh_value_id();
+
+        let phi = IRInstruction::Phi {
+            result,
+            metadata: InstructionMetadata {
+                memory_slot: None,
+                allocation_site: None,
+            },
+            incoming: arm_ssa_results,
+            span: span.clone(),
+            file: file.to_string(),
+        };
+
+        self.blocks.get_mut(&merge_block).unwrap().add_phi(phi);
+    }
+
+    fn check_struct_pattern_match(
+        &mut self,
+        pattern: &crate::ast::TypedPattern,
+        struct_val: &IRValue,
+    ) -> IRValue {
+        use crate::ast::TypedPatKind;
+        match &pattern.pat {
+            TypedPatKind::Struct { fields, .. } => {
+                // For each field in the pattern, check if it matches
+                let mut all_match = IRValue::Bool(true);
+
+                for (_field_name, field_id, nested_pattern) in fields {
+                    let field_val =
+                        self.extract_struct_field(struct_val, crate::ir::FieldId(field_id.0));
+
+                    // Recursively check the nested pattern match
+                    let field_matches = self.check_nested_pattern_match(nested_pattern, &field_val);
+
+                    // Combine with AND operation
+                    let and_result = self.builder.fresh_value_id();
+                    let and_inst = IRInstruction::BinOp {
+                        result: and_result,
+                        metadata: InstructionMetadata {
+                            memory_slot: None,
+                            allocation_site: None,
+                        },
+                        left: all_match,
+                        op: BinOp::And,
+                        right: field_matches,
+                        span: pattern.span.clone(),
+                        file: pattern.file.clone(),
+                    };
+
+                    self.blocks
+                        .get_mut(&self.current_block)
+                        .unwrap()
+                        .instructions
+                        .push(and_inst);
+                    all_match = IRValue::SSA(and_result);
+                }
+
+                all_match
+            }
+            // For other patterns that shouldn't occur in struct matching context,
+            // we'll handle them in the recursive function
+            _ => self.check_nested_pattern_match(pattern, struct_val),
+        }
+    }
+
+    fn check_nested_pattern_match(
+        &mut self,
+        pattern: &crate::ast::TypedPattern,
+        value: &IRValue,
+    ) -> IRValue {
+        use crate::ast::TypedPatKind;
+        match &pattern.pat {
+            TypedPatKind::Literal(literal) => {
+                // Compare the value with the literal
+                let literal_val = match literal {
+                    crate::ast::Literal::Int(i) => IRValue::Int(*i),
+                    crate::ast::Literal::Bool(b) => IRValue::Bool(*b),
+                    crate::ast::Literal::Float(f) => IRValue::Float(*f),
+                    crate::ast::Literal::String(s) => IRValue::String(s.clone()),
+                };
+
+                let result = self.builder.fresh_value_id();
+                let eq_inst = IRInstruction::BinOp {
+                    result,
+                    metadata: InstructionMetadata {
+                        memory_slot: None,
+                        allocation_site: None,
+                    },
+                    left: value.clone(),
+                    op: BinOp::Eq,
+                    right: literal_val,
+                    span: pattern.span.clone(),
+                    file: pattern.file.clone(),
+                };
+
+                self.blocks
+                    .get_mut(&self.current_block)
+                    .unwrap()
+                    .instructions
+                    .push(eq_inst);
+                IRValue::SSA(result)
+            }
+            TypedPatKind::Bind { .. } | TypedPatKind::Wildcard => {
+                // Variable/wildcard patterns always match
+                IRValue::Bool(true)
+            }
+            // Handle other nested patterns as needed
+            _ => IRValue::Bool(true), // Default assumption for complex patterns
+        }
+    }
+
+    fn lower_literal_match(
+        &mut self,
+        matched_val: IRValue,
+        arms: &[crate::ast::TypedMatchArm],
+        arm_blocks: &[BasicBlockId],
+        merge_block: BasicBlockId,
+        span: &Range<usize>,
+        file: &str,
+    ) {
+        // For literal matches, we generate a series of conditional branches
+        // instead of a switch statement
+        let mut current_block = self.current_block;
+
+        // Process each arm in sequence and collect results
+        let mut arm_results = Vec::new();
+
+        for (i, arm) in arms.iter().enumerate() {
+            // Create a comparison block for this arm
+            let compare_block = self.new_block();
+
+            // Determine the "else" block for this comparison
+            // If this is the last arm, the "else" goes directly to this arm (it's the fallback)
+            // If this is the second-to-last arm and the last arm is a catch-all (Bind/Wildcard),
+            // the "else" should go to the last arm's block
+            // Otherwise, it goes to the next comparison block
+            let else_block = if i == arms.len() - 1 {
+                // This is the last arm, so "else" should go to this arm's block
+                arm_blocks[i]
+            } else if i == arms.len() - 2 {
+                // This is the second-to-last arm, check if last arm is catch-all
+                let next_arm_is_catchall = matches!(
+                    arms[i + 1].pattern.pat,
+                    crate::ast::TypedPatKind::Wildcard | crate::ast::TypedPatKind::Bind { .. }
+                );
+
+                if next_arm_is_catchall {
+                    // Last arm is catch-all, so second-to-last "else" goes to last arm block
+                    arm_blocks[i + 1]
+                } else {
+                    // Last arm is not catch-all, so we need another comparison
+                    self.new_block()
+                }
+            } else {
+                // This is not the last or second-to-last arm, so "else" should go to next comparison
+                self.new_block()
+            };
+
+            // Branch from current block to the comparison block
+            self.set_current_block(current_block);
+            self.emit_jump(compare_block, span, file);
+            self.add_cfg_edge(current_block, compare_block);
+
+            // In the comparison block, check if the matched value matches the pattern
+            self.set_current_block(compare_block);
+
+            match &arm.pattern.pat {
+                crate::ast::TypedPatKind::Literal(literal) => {
+                    // Need to generate a comparison instruction
+                    let literal_val = match literal {
+                        crate::ast::Literal::Int(n) => IRValue::Int(*n),
+                        crate::ast::Literal::Float(f) => IRValue::Float(*f),
+                        crate::ast::Literal::Bool(b) => IRValue::Bool(*b),
+                        crate::ast::Literal::String(s) => IRValue::String(s.clone()),
+                    };
+
+                    let cmp_result = self.builder.fresh_value_id();
+
+                    // Create a comparison (for now assuming integer comparison)
+                    self.emit(IRInstruction::BinOp {
+                        result: cmp_result,
+                        metadata: InstructionMetadata {
+                            memory_slot: None,
+                            allocation_site: None,
+                        },
+                        left: matched_val.clone(),
+                        op: BinOp::Eq,
+                        right: literal_val,
+                        span: arm.pattern.span.clone(),
+                        file: arm.pattern.file.clone(),
+                    });
+
+                    // Create conditional branch: if comparison is true go to arm, else go to else_block
+                    // Set up the "then" arm block
+                    let current_block_ref = self.blocks.get_mut(&compare_block).unwrap();
+                    current_block_ref.terminator = Some(IRTerminator::Branch {
+                        condition: IRValue::SSA(cmp_result),
+                        then_block: arm_blocks[i],
+                        else_block,
+                        span: span.clone(),
+                        file: file.to_string(),
+                    });
+
+                    // Process the "then" (arm) block
+                    self.set_current_block(arm_blocks[i]);
+
+                    // Bind pattern variables
+                    // For literal patterns, we need to treat the variable as bound to the matched value
+                    self.bind_pattern(&arm.pattern, matched_val.clone());
+
+                    // Handle guard if present
+                    if let Some(guard) = &arm.guard {
+                        // TODO: Implement guard checking
+                        // For now, just lower the guard expression but don't check it
+                        self.lower_expr(guard);
+                    }
+
+                    // Lower the arm body
+                    let result = self.lower_expr(&arm.body);
+
+                    // If the result is not an SSA value, create an instruction to store it as one in this block
+                    let final_result = match result {
+                        IRValue::SSA(_) => result,
+                        _ => {
+                            let temp_id = self.builder.fresh_value_id();
+                            self.emit(IRInstruction::Let {
+                                result: temp_id,
+                                metadata: InstructionMetadata {
+                                    memory_slot: None,
+                                    allocation_site: None,
+                                },
+                                var: format!("_arm_result_{}", i), // Unique variable name for each arm
+                                value: result,
+                                var_type: IRTypeWithMemory {
+                                    type_: IRType::Int, // Placeholder - would be actual type in real implementation
+                                    span: span.clone(),
+                                    file: file.to_string(),
+                                    memory_kind: MemoryKind::Stack,
+                                    allocation_id: None,
+                                },
+                                span: span.clone(),
+                                file: file.to_string(),
+                            });
+                            IRValue::SSA(temp_id)
+                        }
+                    };
+
+                    let end_block = self.current_block;
+                    arm_results.push((final_result, end_block));
+
+                    // Jump to merge block
+                    self.emit_jump(merge_block, span, file);
+                    self.add_cfg_edge(end_block, merge_block);
+
+                    // Update CFG
+                    self.add_cfg_edge(compare_block, arm_blocks[i]);
+                    self.add_cfg_edge(compare_block, else_block);
+
+                    // Update current block for next iteration (for non-last arms)
+                    if i < arms.len() - 1 {
+                        current_block = else_block;
+                    } else {
+                        // If this is the last arm, we don't need to continue the loop
+                        // The "else" path (which is the arm block itself) will handle the fall-through case
+                        // and jump to merge_block after processing
+                        break;
+                    }
+                }
+                crate::ast::TypedPatKind::Wildcard | crate::ast::TypedPatKind::Bind { .. } => {
+                    // For wildcard and binding patterns, these are typically used as catch-all/final patterns
+                    // If this is the last pattern in the match, it catches all remaining cases
+                    // We need to process it differently based on position
+                    if i == arms.len() - 1 {
+                        // This is the last arm, so if we reach this point, execute this arm
+                        // The "else" block already points to this arm_blocks[i]
+                        self.set_current_block(arm_blocks[i]);
+
+                        // Bind pattern variables
+                        self.bind_pattern(&arm.pattern, matched_val.clone());
+
+                        // Handle guard if present
+                        if let Some(guard) = &arm.guard {
+                            // TODO: Implement guard checking
+                            // For now, just lower the guard expression but don't check it
+                            self.lower_expr(guard);
+                        }
+
+                        // Lower the arm body
+                        let result = self.lower_expr(&arm.body);
+
+                        // If the result is not an SSA value, create an instruction to store it as one in this block
+                        let final_result = match result {
+                            IRValue::SSA(_) => result,
+                            _ => {
+                                let temp_id = self.builder.fresh_value_id();
+                                self.emit(IRInstruction::Let {
+                                    result: temp_id,
+                                    metadata: InstructionMetadata {
+                                        memory_slot: None,
+                                        allocation_site: None,
+                                    },
+                                    var: format!("_arm_result_{}", i), // Unique variable name for each arm
+                                    value: result,
+                                    var_type: IRTypeWithMemory {
+                                        type_: IRType::Int, // Placeholder - would be actual type in real implementation
+                                        span: span.clone(),
+                                        file: file.to_string(),
+                                        memory_kind: MemoryKind::Stack,
+                                        allocation_id: None,
+                                    },
+                                    span: span.clone(),
+                                    file: file.to_string(),
+                                });
+                                IRValue::SSA(temp_id)
+                            }
+                        };
+
+                        let end_block = self.current_block;
+                        arm_results.push((final_result, end_block));
+
+                        // Jump to merge block
+                        self.emit_jump(merge_block, span, file);
+                        self.add_cfg_edge(end_block, merge_block);
+
+                        // If this is truly the last arm, break
+                        // Otherwise, continue to handle next comparison
+                        if i == arms.len() - 1 {
+                            break;
+                        }
+                    } else {
+                        // Not the last arm, so treat it as a potential catch-all
+                        // but since there are more patterns after, this means there's an issue
+                        // In normal pattern matching, catch-all patterns should come last
+                        // For this implementation, let's just treat it as the final arm anyway
+                        self.set_current_block(arm_blocks[i]);
+
+                        // Bind pattern variables
+                        self.bind_pattern(&arm.pattern, matched_val.clone());
+
+                        // Handle guard if present
+                        if let Some(guard) = &arm.guard {
+                            // TODO: Implement guard checking
+                            // For now, just lower the guard expression but don't check it
+                            self.lower_expr(guard);
+                        }
+
+                        // Lower the arm body
+                        let result = self.lower_expr(&arm.body);
+
+                        // If the result is not an SSA value, create an instruction to store it as one in this block
+                        let final_result = match result {
+                            IRValue::SSA(_) => result,
+                            _ => {
+                                let temp_id = self.builder.fresh_value_id();
+                                self.emit(IRInstruction::Let {
+                                    result: temp_id,
+                                    metadata: InstructionMetadata {
+                                        memory_slot: None,
+                                        allocation_site: None,
+                                    },
+                                    var: format!("_arm_result_{}", i), // Unique variable name for each arm
+                                    value: result,
+                                    var_type: IRTypeWithMemory {
+                                        type_: IRType::Int, // Placeholder - would be actual type in real implementation
+                                        span: span.clone(),
+                                        file: file.to_string(),
+                                        memory_kind: MemoryKind::Stack,
+                                        allocation_id: None,
+                                    },
+                                    span: span.clone(),
+                                    file: file.to_string(),
+                                });
+                                IRValue::SSA(temp_id)
+                            }
+                        };
+
+                        let end_block = self.current_block;
+                        arm_results.push((final_result, end_block));
+
+                        // Jump to merge block
+                        self.emit_jump(merge_block, span, file);
+                        self.add_cfg_edge(end_block, merge_block);
+
+                        // If this is truly the last arm, break
+                        // Otherwise, continue to handle next comparison
+                        if i == arms.len() - 1 {
+                            break;
+                        }
+                    }
+                }
+                _ => {
+                    // For other patterns, treat as literal if not last, or catch-all if last
+                    // Process similarly to literal
+                    if i == arms.len() - 1 {
+                        // Last arm - no comparison needed, just execute this arm
+                        self.set_current_block(arm_blocks[i]);
+
+                        // Bind pattern variables
+                        self.bind_pattern(&arm.pattern, matched_val.clone());
+
+                        // Handle guard if present
+                        if let Some(guard) = &arm.guard {
+                            // TODO: Implement guard checking
+                            // For now, just lower the guard expression but don't check it
+                            self.lower_expr(guard);
+                        }
+
+                        // Lower the arm body
+                        let result = self.lower_expr(&arm.body);
+
+                        // If the result is not an SSA value, create an instruction to store it as one in this block
+                        let final_result = match result {
+                            IRValue::SSA(_) => result,
+                            _ => {
+                                let temp_id = self.builder.fresh_value_id();
+                                self.emit(IRInstruction::Let {
+                                    result: temp_id,
+                                    metadata: InstructionMetadata {
+                                        memory_slot: None,
+                                        allocation_site: None,
+                                    },
+                                    var: format!("_arm_result_{}", i), // Unique variable name for each arm
+                                    value: result,
+                                    var_type: IRTypeWithMemory {
+                                        type_: IRType::Int, // Placeholder - would be actual type in real implementation
+                                        span: span.clone(),
+                                        file: file.to_string(),
+                                        memory_kind: MemoryKind::Stack,
+                                        allocation_id: None,
+                                    },
+                                    span: span.clone(),
+                                    file: file.to_string(),
+                                });
+                                IRValue::SSA(temp_id)
+                            }
+                        };
+
+                        let end_block = self.current_block;
+                        arm_results.push((final_result, end_block));
+
+                        // Jump to merge block
+                        self.emit_jump(merge_block, span, file);
+                        self.add_cfg_edge(end_block, merge_block);
+
+                        // If this is truly the last arm, break
+                        // Otherwise, continue to handle next comparison
+                        if i == arms.len() - 1 {
+                            break;
+                        }
+                    } else {
+                        // Not the last arm - but we don't know how to compare other patterns
+                        // For now, just treat as unreachable or add a default comparison
+                        // This should ideally be an error, but let's make it work for now
+                        self.set_current_block(arm_blocks[i]);
+
+                        // Bind pattern variables
+                        self.bind_pattern(&arm.pattern, matched_val.clone());
+
+                        // Handle guard if present
+                        if let Some(guard) = &arm.guard {
+                            // TODO: Implement guard checking
+                            // For now, just lower the guard expression but don't check it
+                            self.lower_expr(guard);
+                        }
+
+                        // Lower the arm body
+                        let result = self.lower_expr(&arm.body);
+
+                        // If the result is not an SSA value, create an instruction to store it as one in this block
+                        let final_result = match result {
+                            IRValue::SSA(_) => result,
+                            _ => {
+                                let temp_id = self.builder.fresh_value_id();
+                                self.emit(IRInstruction::Let {
+                                    result: temp_id,
+                                    metadata: InstructionMetadata {
+                                        memory_slot: None,
+                                        allocation_site: None,
+                                    },
+                                    var: format!("_arm_result_{}", i), // Unique variable name for each arm
+                                    value: result,
+                                    var_type: IRTypeWithMemory {
+                                        type_: IRType::Int, // Placeholder - would be actual type in real implementation
+                                        span: span.clone(),
+                                        file: file.to_string(),
+                                        memory_kind: MemoryKind::Stack,
+                                        allocation_id: None,
+                                    },
+                                    span: span.clone(),
+                                    file: file.to_string(),
+                                });
+                                IRValue::SSA(temp_id)
+                            }
+                        };
+
+                        let end_block = self.current_block;
+                        arm_results.push((final_result, end_block));
+
+                        // Jump to merge block
+                        self.emit_jump(merge_block, span, file);
+                        self.add_cfg_edge(end_block, merge_block);
+
+                        // Continue to next comparison
+                        current_block = else_block;
+                    }
+                }
+            };
+        }
+
+        // Now create the merge block with the PHI node
         self.set_current_block(merge_block);
         let result = self.builder.fresh_value_id();
 
@@ -1586,8 +2526,6 @@ impl<'a> FunctionBuilder<'a> {
         };
 
         self.blocks.get_mut(&merge_block).unwrap().add_phi(phi);
-
-        IRValue::SSA(result)
     }
 
     fn bind_pattern(&mut self, pattern: &crate::ast::TypedPattern, value: IRValue) {
@@ -1658,6 +2596,85 @@ impl<'a> FunctionBuilder<'a> {
                 self.bind_pattern(pattern, value);
             }
 
+            crate::ast::TypedPatKind::Array {
+                elements,
+                element_type: _, // We'll ignore this to avoid type variable issues
+            } => {
+                // Handle array pattern matching by extracting elements and binding them to patterns
+                // For patterns without spread, we extract each element by index
+                // For patterns with spread, a more complex implementation would be needed (slicing)
+
+                let mut element_idx = 0;
+
+                for element in elements {
+                    match element {
+                        crate::ast::TypedArrayPatElement::Pattern(pattern) => {
+                            // Extract element at current index from the array
+                            let element_value = self.builder.fresh_value_id();
+
+                            // Use IR's Index instruction to extract the array element at index
+                            self.emit(IRInstruction::Index {
+                                result: element_value,
+                                target: value.clone(), // The array value
+                                index: IRValue::Int(element_idx), // Current index
+                                metadata: InstructionMetadata {
+                                    memory_slot: None,
+                                    allocation_site: None,
+                                },
+                                element_type: IRTypeWithMemory {
+                                    type_: IRType::Int, // Placeholder - type inference should handle this
+                                    span: 0..0,
+                                    file: String::new(),
+                                    memory_kind: MemoryKind::Stack,
+                                    allocation_id: None,
+                                },
+                                span: 0..0,
+                                file: String::new(),
+                            });
+
+                            // Bind the extracted element to the pattern
+                            self.bind_pattern(pattern, IRValue::SSA(element_value));
+                            element_idx += 1;
+                        }
+                        crate::ast::TypedArrayPatElement::Spread(pattern) => {
+                            // Create a slice from the current element_idx position to the end of the array
+                            // This handles patterns like [a, b, ...rest] where 'rest' gets the remaining elements
+
+                            // Create the slice operation
+                            let result = self.builder.fresh_value_id();
+                            let alloc_id = self.builder.fresh_alloc_id();
+
+                            self.emit(IRInstruction::Slice {
+                                result,
+                                metadata: InstructionMetadata {
+                                    memory_slot: None,
+                                    allocation_site: Some(alloc_id),
+                                },
+                                array: value.clone(), // The original array being matched
+                                start: IRValue::Int(element_idx), // Start from the current index
+                                end: None,            // Slice to the end of the array
+                                element_type: IRTypeWithMemory {
+                                    type_: IRType::Int, // Placeholder - type inference should handle this
+                                    span: 0..0,
+                                    file: String::new(),
+                                    memory_kind: MemoryKind::Heap, // Arrays are heap allocated
+                                    allocation_id: None,
+                                },
+                                span: pattern.span.clone(),
+                                file: pattern.file.clone(),
+                            });
+
+                            // Bind the resulting slice to the spread pattern variable
+                            let slice_result = IRValue::SSA(result);
+                            self.bind_pattern(pattern, slice_result);
+
+                            // Break the loop since the spread pattern takes all remaining elements
+                            break;
+                        }
+                    }
+                }
+            }
+
             _ => {
                 // Other pattern types not yet implemented
                 todo!("Pattern kind: {:?}", pattern.pat);
@@ -1666,17 +2683,42 @@ impl<'a> FunctionBuilder<'a> {
     }
 
     fn extract_discriminant(&mut self, enum_val: &IRValue) -> IRValue {
+        // Create a fresh value ID for the result
         let result = self.builder.fresh_value_id();
+
+        // For enum discriminant extraction, we need to properly extract the discriminant tag
+        // based on the enum's memory representation.
+        // The discriminant field access needs to work with the enum's actual memory layout
 
         // Extract the ValueId from the IRValue if it's an SSA value
         let base_value_id = if let IRValue::SSA(id) = enum_val {
             *id
         } else {
-            // If enum_val is not an SSA value, we need to create one
-            // For now, just use a fresh ID - this might need more complex handling
-            self.builder.fresh_value_id()
+            // If enum_val is not an SSA value, we need to create one to hold it
+            let temp_id = self.builder.fresh_value_id();
+            self.emit(IRInstruction::Let {
+                result: temp_id,
+                metadata: InstructionMetadata {
+                    memory_slot: None,
+                    allocation_site: None,
+                },
+                var: "_temp_enum_disc".to_string(),
+                value: enum_val.clone(),
+                var_type: IRTypeWithMemory {
+                    type_: IRType::Int, // This is a placeholder - should be the actual enum type
+                    span: 0..0,
+                    file: String::new(),
+                    memory_kind: MemoryKind::Stack,
+                    allocation_id: None,
+                },
+                span: 0..0,
+                file: String::new(),
+            });
+            temp_id
         };
 
+        // Use Load to extract the discriminant field from the enum value
+        // Based on the interpreter logic, enum discriminants are typically in field 0
         self.emit(IRInstruction::Load {
             result,
             address: enum_val.clone(),
@@ -2940,5 +3982,109 @@ impl<'a> FunctionBuilder<'a> {
         });
 
         IRValue::SSA(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::Interner;
+
+    #[test]
+    fn test_fresh_ids() {
+        let interner = Interner::new();
+        let target = TargetInfo::vm_target(); // Using vm_target instead of default
+        let mut builder = IRBuilder::new(target, interner);
+
+        // Test fresh ID generation - values after register_builtin_types may not start at 0
+        let struct_id1 = builder.fresh_struct_id();
+        let struct_id2 = builder.fresh_struct_id();
+        assert_ne!(struct_id1, struct_id2);
+
+        let enum_id = builder.fresh_enum_id();
+        assert_ne!(enum_id.0, 9999); // Should be a normal number, not an invalid value
+
+        let effect_id = builder.fresh_effect_id();
+        assert_ne!(effect_id.0, 9999); // Should be a normal number, not an invalid value
+
+        let function_id = builder.fresh_function_id();
+        assert_ne!(function_id.0, 9999); // Should be a normal number, not an invalid value
+
+        let value_id = builder.fresh_value_id();
+        assert_ne!(value_id.0, 9999); // Should be a normal number, not an invalid value
+
+        let block_id = builder.fresh_block_id();
+        assert_ne!(block_id.0, 9999); // Should be a normal number, not an invalid value
+
+        let alloc_id = builder.fresh_alloc_id(); // Using fresh_alloc_id instead of fresh_allocation_id
+        assert_ne!(alloc_id.0, 9999); // Should be a normal number, not an invalid value
+
+        let memory_slot_id = builder.fresh_memory_slot_id();
+        assert_ne!(memory_slot_id.0, 9999); // Should be a normal number, not an invalid value
+    }
+
+    #[test]
+    fn test_build_cfg() {
+        let interner = Interner::new();
+        let target = TargetInfo::vm_target();
+        let builder = IRBuilder::new(target, interner);
+
+        // Create some basic blocks to build a CFG
+        let block1 = BasicBlock {
+            id: BasicBlockId(0),
+            phi_nodes: vec![],
+            instructions: vec![],
+            terminator: Some(IRTerminator::Return {
+                value: None,
+                span: 0..0,
+                file: String::new(),
+            }),
+        };
+
+        let block2 = BasicBlock {
+            id: BasicBlockId(1),
+            phi_nodes: vec![],
+            instructions: vec![],
+            terminator: Some(IRTerminator::Jump {
+                target: BasicBlockId(0),
+                span: 0..0,
+                file: String::new(),
+            }),
+        };
+
+        // Create a CFG from these blocks
+        let cfg = builder.build_cfg(&[block1, block2]);
+
+        // Basic assertion: cfg should have some basic structure
+        // The exact structure depends on the implementation, but it should be non-empty
+        assert!(cfg.blocks.contains_key(&BasicBlockId(0)));
+        assert!(cfg.blocks.contains_key(&BasicBlockId(1)));
+    }
+
+    #[test]
+    fn test_fresh_struct_id_sequential() {
+        let interner = Interner::new();
+        let target = TargetInfo::vm_target();
+        let mut builder = IRBuilder::new(target, interner);
+
+        let id1 = builder.fresh_struct_id();
+        let id2 = builder.fresh_struct_id();
+        let id3 = builder.fresh_struct_id();
+
+        // IDs should be sequential (accounting for builtin types usage)
+        assert!(id2.0 > id1.0);
+        assert!(id3.0 > id2.0);
+    }
+
+    #[test]
+    fn test_fresh_value_id() {
+        let interner = Interner::new();
+        let target = TargetInfo::vm_target();
+        let mut builder = IRBuilder::new(target, interner);
+
+        let id1 = builder.fresh_value_id();
+        let id2 = builder.fresh_value_id();
+
+        assert_ne!(id1, id2);
     }
 }

@@ -36,12 +36,9 @@ impl UntypedValidator {
     fn builtin_macros() -> HashMap<String, MacroDef> {
         let mut macros = HashMap::new();
 
-        // Define builtin macros with empty rules since they are handled specially during type checking
-        // Register both with and without exclamation marks in case parser strips them
-        let builtin_names = ["println!", "print!", "typeof!", "input!"];
-        let fallback_names = ["println", "print", "typeof", "input"];
+        let builtin_names = ["println", "print", "typeof", "input", "push"];
 
-        for name in builtin_names.iter().chain(fallback_names.iter()) {
+        for name in builtin_names.iter() {
             let macro_def = MacroDef {
                 span: 0..0, // Placeholder span
                 file: String::new(),
@@ -56,10 +53,7 @@ impl UntypedValidator {
     }
 
     fn is_builtin_macro(&self, name: &str) -> bool {
-        matches!(
-            name,
-            "println!" | "print!" | "typeof!" | "input!" | "println" | "print" | "typeof" | "input"
-        )
+        matches!(name, "println" | "print" | "typeof" | "input" | "push")
     }
 
     pub fn validate(&mut self, nodes: Vec<ASTNode>, current_file: &Path) -> Vec<ASTNode> {
@@ -178,7 +172,7 @@ impl UntypedValidator {
         let new_expr_kind = match expr.expr {
             ExprKind::MacroCall(ref name, ref args, ref delimiter) => {
                 match name.as_str() {
-                    "println!" | "println" | "print!" | "print" => {
+                    "println" | "print" => {
                         // Builtin print/println macros are handled specially during type checking
                         // Don't desugar them here in untyped validation - keep as macro calls for type checker
                         let desugared_args: Vec<_> = args
@@ -187,7 +181,7 @@ impl UntypedValidator {
                             .collect();
                         ExprKind::MacroCall(name.to_string(), desugared_args, delimiter.clone())
                     }
-                    "typeof!" | "typeof" => {
+                    "typeof" => {
                         // typeof! macro: returns the string representation of the type of the argument
                         if args.len() != 1 {
                             // This error should ideally be caught at type checking, but we add it here for safety
@@ -208,22 +202,14 @@ impl UntypedValidator {
                             )
                         }
                     }
-                    "input!" | "input" => {
+                    "input" => {
                         // input! macro: returns user input as a string
-                        if !args.is_empty() {
-                            // This error should ideally be caught at type checking, but we add it here for safety
-                            ExprKind::String("".to_string()) // Return empty string for safety
-                        } else {
-                            // Create a call to the builtin input function
-                            ExprKind::Call(
-                                Box::new(Expr {
-                                    span: expr.span.clone(),
-                                    file: expr.file.clone(),
-                                    expr: ExprKind::Variable("input".to_string()),
-                                }),
-                                vec![], // input! takes no arguments
-                            )
-                        }
+                        // Don't desugar here, keep as macro call for type checker to handle
+                        let desugared_args: Vec<_> = args
+                            .iter()
+                            .map(|arg| self.desugar_expr_in_macro(arg))
+                            .collect();
+                        ExprKind::MacroCall(name.to_string(), desugared_args, delimiter.clone())
                     }
                     _ => {
                         // For non-builtin macros, just desugar the arguments (but built-in macros shouldn't reach here in the normal flow since they're handled elsewhere)
@@ -529,6 +515,10 @@ impl UntypedValidator {
             | ExprKind::Error
             | ExprKind::Import(_) => {
                 expr.expr // Keep as is
+            }
+            ExprKind::Spread(spread_expr) => {
+                // For spread operator, just pass through the expression
+                ExprKind::Spread(Box::new(self.desugar_builtin_macros(*spread_expr)))
             }
         };
 
@@ -1087,6 +1077,15 @@ impl UntypedValidator {
                 }
             }
 
+            ExprKind::Spread(spread_expr) => {
+                // Validate the spread argument, then pass it through
+                let validated_spread = self.validate_expr(*spread_expr);
+                Expr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: ExprKind::Spread(Box::new(validated_spread)),
+                }
+            }
             ExprKind::Import(import) => {
                 // Import validation is handled by ModuleResolver during import resolution
                 Expr {

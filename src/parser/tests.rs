@@ -1949,3 +1949,202 @@ fn test_extern_function_with_generics() {
         _ => panic!("Expected extern function"),
     }
 }
+
+#[test]
+fn test_array_spread_expressions() {
+    // Test array with spread operator
+    let expr = parse_expr("[...arr]");
+    match &expr.expr {
+        ExprKind::Array(elements) => {
+            assert_eq!(elements.len(), 1);
+            match &elements[0] {
+                Expr {
+                    expr: ExprKind::Spread(spread_expr),
+                    ..
+                } => {
+                    // Inner expression should be a variable access
+                    match &spread_expr.expr {
+                        ExprKind::Variable(_) => {}
+                        _ => panic!("Expected variable in spread"),
+                    }
+                }
+                _ => panic!("Expected spread operator"),
+            }
+        }
+        _ => panic!("Expected array expression"),
+    }
+
+    // Test array with multiple elements and spread
+    let expr = parse_expr("[1, 2, ...rest]");
+    match &expr.expr {
+        ExprKind::Array(elements) => {
+            assert_eq!(elements.len(), 3); // Three elements: 1, 2, and ...rest
+            assert!(matches!(elements[0].expr, ExprKind::Int(1)));
+            assert!(matches!(elements[1].expr, ExprKind::Int(2)));
+            match &elements[2] {
+                Expr {
+                    expr: ExprKind::Spread(spread_expr),
+                    ..
+                } => match &spread_expr.expr {
+                    ExprKind::Variable(_) => {}
+                    _ => panic!("Expected variable in spread"),
+                },
+                _ => panic!("Expected spread operator"),
+            }
+        }
+        _ => panic!("Expected array expression"),
+    }
+
+    // Test array with spread at the beginning
+    let expr = parse_expr("[...start, end]");
+    match &expr.expr {
+        ExprKind::Array(elements) => {
+            assert_eq!(elements.len(), 2); // Two elements: ...start and end
+            match &elements[0] {
+                Expr {
+                    expr: ExprKind::Spread(spread_expr),
+                    ..
+                } => match &spread_expr.expr {
+                    ExprKind::Variable(_) => {}
+                    _ => panic!("Expected variable in spread"),
+                },
+                _ => panic!("Expected spread operator"),
+            }
+            assert!(matches!(elements[1].expr, ExprKind::Variable(_)));
+        }
+        _ => panic!("Expected array expression"),
+    }
+
+    // Test array with spread in the middle
+    let expr = parse_expr("[head, ...middle, tail]");
+    match &expr.expr {
+        ExprKind::Array(elements) => {
+            assert_eq!(elements.len(), 3); // Three elements: head, ...middle, tail
+            assert!(matches!(elements[0].expr, ExprKind::Variable(_))); // head
+            match &elements[1] {
+                Expr {
+                    expr: ExprKind::Spread(spread_expr),
+                    ..
+                } => match &spread_expr.expr {
+                    ExprKind::Variable(_) => {}
+                    _ => panic!("Expected variable in spread"),
+                },
+                _ => panic!("Expected spread operator"),
+            }
+            assert!(matches!(elements[2].expr, ExprKind::Variable(_))); // tail
+        }
+        _ => panic!("Expected array expression"),
+    }
+}
+
+#[test]
+fn test_array_pattern_with_spread() {
+    // Test array pattern with spread in match expression
+    let expr = parse_expr("match arr { [head, ...tail] => head }");
+    match &expr.expr {
+        ExprKind::Match(_scrutinee, arms) => {
+            assert_eq!(arms.len(), 1);
+            let pattern = &arms[0].pattern;
+            match &pattern.pat {
+                PatKind::Array(elements) => {
+                    assert_eq!(elements.len(), 2);
+                    match &elements[0] {
+                        ArrayPatElement::Pattern(Pattern {
+                            pat: PatKind::Bind(name),
+                            ..
+                        }) => {
+                            assert_eq!(name, "head");
+                        }
+                        _ => panic!("Expected bind pattern for head"),
+                    }
+                    match &elements[1] {
+                        ArrayPatElement::Spread(Pattern {
+                            pat: PatKind::Bind(name),
+                            ..
+                        }) => {
+                            assert_eq!(name, "tail");
+                        }
+                        _ => panic!("Expected spread pattern for tail"),
+                    }
+                }
+                _ => panic!("Expected array pattern"),
+            }
+        }
+        _ => panic!("Expected match expression"),
+    }
+
+    // Test array pattern with spread at the beginning
+    let expr = parse_expr("match arr { [...init, last] => last }");
+    match &expr.expr {
+        ExprKind::Match(_scrutinee, arms) => {
+            assert_eq!(arms.len(), 1);
+            let pattern = &arms[0].pattern;
+            match &pattern.pat {
+                PatKind::Array(elements) => {
+                    assert_eq!(elements.len(), 2);
+                    match &elements[0] {
+                        ArrayPatElement::Spread(Pattern {
+                            pat: PatKind::Bind(name),
+                            ..
+                        }) => {
+                            assert_eq!(name, "init");
+                        }
+                        _ => panic!("Expected spread pattern for init"),
+                    }
+                    match &elements[1] {
+                        ArrayPatElement::Pattern(Pattern {
+                            pat: PatKind::Bind(name),
+                            ..
+                        }) => {
+                            assert_eq!(name, "last");
+                        }
+                        _ => panic!("Expected bind pattern for last"),
+                    }
+                }
+                _ => panic!("Expected array pattern"),
+            }
+        }
+        _ => panic!("Expected match expression"),
+    }
+
+    // Test empty array pattern
+    let expr = parse_expr("match arr { [] => true }");
+    match &expr.expr {
+        ExprKind::Match(_scrutinee, arms) => {
+            assert_eq!(arms.len(), 1);
+            let pattern = &arms[0].pattern;
+            match &pattern.pat {
+                PatKind::Array(elements) => {
+                    assert_eq!(elements.len(), 0); // Empty array pattern
+                }
+                _ => panic!("Expected array pattern"),
+            }
+        }
+        _ => panic!("Expected match expression"),
+    }
+
+    // Test array pattern with only spread (like [...rest])
+    let expr = parse_expr("match arr { [...all] => all }");
+    match &expr.expr {
+        ExprKind::Match(_scrutinee, arms) => {
+            assert_eq!(arms.len(), 1);
+            let pattern = &arms[0].pattern;
+            match &pattern.pat {
+                PatKind::Array(elements) => {
+                    assert_eq!(elements.len(), 1);
+                    match &elements[0] {
+                        ArrayPatElement::Spread(Pattern {
+                            pat: PatKind::Bind(name),
+                            ..
+                        }) => {
+                            assert_eq!(name, "all");
+                        }
+                        _ => panic!("Expected spread pattern"),
+                    }
+                }
+                _ => panic!("Expected array pattern"),
+            }
+        }
+        _ => panic!("Expected match expression"),
+    }
+}

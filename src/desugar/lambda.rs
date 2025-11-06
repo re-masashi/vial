@@ -98,6 +98,21 @@ impl LambdaDesugarer {
     fn desugar_expr(&mut self, expr: TypedExpr) -> (TypedExpr, Vec<TypedASTNode>) {
         let mut new_functions = Vec::new();
         let new_expr = match expr.expr {
+            TypedExprKind::Spread {
+                value,
+                element_type,
+            } => {
+                // For spread, we'll return the expression as-is with the same structure
+                TypedExpr {
+                    span: expr.span,
+                    file: expr.file,
+                    expr: TypedExprKind::Spread {
+                        value,
+                        element_type,
+                    },
+                    type_: expr.type_,
+                }
+            }
             TypedExprKind::Lambda {
                 args,
                 body,
@@ -851,5 +866,40 @@ impl LambdaDesugarer {
             function_type,
             body: Some(body),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_lambda_desugarer_new() {
+        let interner = Interner::new();
+        let desugarer = LambdaDesugarer::new(interner);
+
+        assert_eq!(desugarer.lambda_counter, 0);
+    }
+
+    #[test]
+    fn test_desugar_empty_program() {
+        let interner = Interner::new();
+        let mut desugarer = LambdaDesugarer::new(interner);
+
+        let empty_program = vec![];
+        let result = desugarer.desugar_program(empty_program);
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_lambda_counter_increment() {
+        let interner = Interner::new();
+        let mut desugarer = LambdaDesugarer::new(interner);
+
+        let initial_counter = desugarer.lambda_counter;
+        desugarer.lambda_counter += 1;
+
+        assert_eq!(desugarer.lambda_counter, initial_counter + 1);
     }
 }

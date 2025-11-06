@@ -189,14 +189,25 @@ fn pattern<'src>()
 
         let bind = ident().map(PatKind::Bind).labelled("binding");
 
+        // Parse array pattern: [p1, p2, ..., pn] with optional spread operator
+        // Let's keep it simple and parse the spread operator separately
+        let pattern_or_spread = choice((
+            // Spread pattern: ...pattern
+            just(Token::Spread)
+                .ignore_then(pat.clone())
+                .map(ArrayPatElement::Spread),
+            // Regular pattern: pattern
+            pat.clone().map(ArrayPatElement::Pattern),
+        ));
+
+        let array_elements = pattern_or_spread
+            .separated_by(just(Token::Comma))
+            .allow_trailing()
+            .collect::<Vec<_>>();
+
         let array_pat = just(Token::LBracket)
             .labelled("'[' for array pattern")
-            .ignore_then(
-                pat.clone()
-                    .separated_by(just(Token::Comma))
-                    .allow_trailing()
-                    .collect::<Vec<_>>(),
-            )
+            .ignore_then(array_elements)
             .then_ignore(just(Token::RBracket).labelled("']' for array pattern"))
             .map(PatKind::Array)
             .recover_with(via_parser(nested_delimiters(
@@ -749,10 +760,23 @@ fn expr<'src>()
             expr: kind,
         });
 
+        // Parse array elements with possible spread
+        // Parse individual array elements, which can be either regular expressions or spread expressions
+        let array_element = choice((
+            // Spread expression: ...expr
+            just(Token::Spread).ignore_then(expr.clone()).map(|e| Expr {
+                span: e.span.clone(), // Need to expand span to include the spread token
+                file: e.file.clone(),
+                expr: ExprKind::Spread(Box::new(e)), // Wrap in a Spread expression
+            }),
+            // Regular expression
+            expr.clone(),
+        ));
+
         let array_or_expr = just(Token::LBracket)
             .labelled("'[' for array")
             .ignore_then(
-                expr.clone()
+                array_element
                     .separated_by(just(Token::Comma))
                     .allow_trailing()
                     .collect::<Vec<_>>(),

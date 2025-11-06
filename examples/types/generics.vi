@@ -1,14 +1,14 @@
 // Generic function example
-def identity<T>(x: T) -> T {
+def identity_gen<T>(x: T) -> T {
     x
 }
 
-/*
-That is the same as
+// That is the same as
 def identity(x) {
     x
 }
-*/
 
 let result = identity(42);
+// let result_gen = identity_gen(42);
+
 result

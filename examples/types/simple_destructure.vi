@@ -1,0 +1,14 @@
+// Test simple struct destructuring with single pattern
+struct Point {
+    x: int,
+    y: int,
+}
+
+def get_coords(p: Point) -> int {
+    match p {
+        Point { x: x_val, y: y_val } => x_val + y_val,
+    }
+}
+
+let p = Point { x: 10, y: 20 };
+get_coords(p)

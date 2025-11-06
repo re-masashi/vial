@@ -1,0 +1,22 @@
+// Test nested struct field access in pattern matching
+struct Point {
+    x: int,
+    y: int,
+}
+
+struct Line {
+    start: Point,
+    end: Point,
+}
+
+def get_start_x(line: Line) -> int {
+    match line {
+        Line { start: Point { x: x_val, y: _ }, end: _ } => x_val,
+    }
+}
+
+let line = Line { 
+    start: Point { x: 5, y: 10 }, 
+    end: Point { x: 15, y: 20 } 
+};
+get_start_x(line)

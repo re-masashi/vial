@@ -1,0 +1,8 @@
+// Test struct field access
+struct Point {
+    x: int,
+    y: int,
+}
+
+let p = Point { x: 10, y: 20 };
+p.x
