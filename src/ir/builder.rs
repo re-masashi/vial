@@ -516,14 +516,14 @@ impl IRBuilder {
                         .insert(self.interner.resolve(eff.name).to_string(), id);
                 }
                 TypedASTNodeKind::Function(f) => {
-                    let id = self.fresh_function_id();
+                    let id = FunctionId(f.function_id.0);
                     let ir_function = self.convert_function_signature(f, id);
                     self.functions.insert(id, ir_function);
                     self.function_names
                         .insert(self.interner.resolve(f.name).to_string(), id);
                 }
                 TypedASTNodeKind::ExternFunction(extern_f) => {
-                    let id = self.fresh_function_id();
+                    let id = FunctionId(extern_f.function_id.0);
                     let ir_extern_function = self.convert_extern_function(extern_f, id);
 
                     // Convert to a regular IRFunction without a body

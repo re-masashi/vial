@@ -1643,11 +1643,8 @@ impl TypeChecker {
 
     // Generalize: Convert free type variables to polymorphic type scheme
     fn generalize(&self, ty: &Rc<Type>, env_types: &HashSet<TypeId>) -> Rc<Type> {
-        // Apply substitution to get the actual type first
-        let substituted_ty = self.substitution.apply(ty);
-
-        // Find free type variables in the substituted type
-        let free_vars = self.free_type_vars(&substituted_ty);
+        // Find free type variables in the original type BEFORE applying substitution
+        let free_vars = self.free_type_vars(ty);
         let quantified: Vec<_> = free_vars
             .into_iter()
             .filter(|var_id| !env_types.contains(var_id))
@@ -1655,19 +1652,20 @@ impl TypeChecker {
 
         if quantified.is_empty() {
             // If no variables to quantify, return the substituted type
-            substituted_ty
+            self.substitution.apply(ty)
         } else {
             // Create polymorphic type with Forall
+            // Apply substitution to the type but keeping the quantified variables abstract
             Rc::new(Type {
-                span: substituted_ty.span.clone(),
-                file: substituted_ty.file.clone(),
+                span: ty.span.clone(),
+                file: ty.file.clone(),
                 type_: TypeKind::Forall {
                     vars: quantified
                         .into_iter()
                         .map(|id| (id.0, Kind::Star))
                         .collect(),
                     constraints: vec![],
-                    body: substituted_ty, // Use the substituted type
+                    body: self.substitution.apply(ty), // Apply substitution to the body, but wrap in Forall
                 },
             })
         }

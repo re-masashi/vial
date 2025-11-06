@@ -645,6 +645,15 @@ impl Interner {
     pub fn resolve(&self, sym: Symbol) -> &str {
         &self.vec[sym.0]
     }
+
+    pub fn dump(&self) -> String {
+        let mut result = String::new();
+        result.push_str("Interner contents:\n");
+        for (i, name) in self.vec.iter().enumerate() {
+            result.push_str(&format!("  {}: {}\n", i, name));
+        }
+        result
+    }
 }
 
 // Unique ID Generators

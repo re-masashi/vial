@@ -145,10 +145,16 @@ fn main() {
     let mut lambda_desugarer = LambdaDesugarer::new(final_interner);
     let lambda_desugared_ast = lambda_desugarer.desugar_program(typed_ast);
 
+    println!("lambda des ast {:#?}", lambda_desugared_ast);
+
     println!("[8/8] Monomorphizing...");
     let final_interner = lambda_desugarer.interner;
+    // println!("Interner before monomorphization: {:?}", final_interner);
     let mut monomorphizer = Monomorphizer::new(final_interner);
     let monomorphized_ast = monomorphizer.monomorphize_program(lambda_desugared_ast);
+
+    // println!("Interner after monomorphization: {:?}", monomorphizer.interner);
+    // println!("MONO AST: {:#?}", monomorphized_ast);
 
     println!("[Validation] Validating typed AST...");
     let mut typed_validator = TypedValidator::new();
