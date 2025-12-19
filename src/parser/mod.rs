@@ -74,6 +74,24 @@ pub fn parse_item(
             let fn_decl = parse_function(iter, file)?;
             ItemKind::Fn(fn_decl)
         }
+        Token::Comptime => {
+            // Expect 'fn' next
+            if let Some((Token::Fn, _)) = iter.peek() {
+                iter.next(); // consume 'fn'
+                let mut fn_decl = parse_function(iter, file)?;
+                fn_decl.is_comptime = true;
+                ItemKind::Fn(fn_decl)
+            } else {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken(
+                        iter.peek().unwrap_or(&(Token::Fn, 0..0)).0.clone(),
+                        vec![Token::Fn],
+                    ),
+                    span: iter.peek().unwrap_or(&(Token::Fn, 0..0)).1.clone(),
+                    valid_syntax: vec!["fn".to_string()],
+                });
+            }
+        }
         Token::Impl => {
             let impl_decl = parse_impl(iter, file)?;
             ItemKind::Impl(impl_decl)
@@ -110,6 +128,7 @@ pub fn parse_item(
                         Token::Struct,
                         Token::Enum,
                         Token::Fn,
+                        Token::Comptime,
                         Token::Impl,
                         Token::Trait,
                         Token::Type,
@@ -833,9 +852,133 @@ fn parse_enum_variant(
     })
 }
 
-pub fn parse_function(_iter: &mut TokenIter, _file: &String) -> Result<FnDecl, ParseError> {
-    todo!()
+pub fn parse_function(iter: &mut TokenIter, file: &String) -> Result<FnDecl, ParseError> {
+    let start_span = iter.peek().map(|(_, s)| s.start).unwrap_or(0);
+
+    // Parse function name
+    let name = match iter.next() {
+        Some((Token::Ident(n), _)) => n,
+        Some((t, span)) => {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken(t, vec![Token::Ident("".to_string())]),
+                span,
+                valid_syntax: vec!["function name".to_string()],
+            });
+        }
+        None => {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedEOF,
+                span: 0..0,
+                valid_syntax: vec!["function name".to_string()],
+            });
+        }
+    };
+
+    // Parse optional generics
+    let generics = parse_generic_params(iter, file)?;
+
+    // Parse parameters
+    expect_token(iter, Token::LParen)?;
+    let mut params = Vec::new();
+    if let Some((Token::RParen, _)) = iter.peek() {
+        iter.next(); // consume ')'
+    } else {
+        loop {
+            let param_start = iter.peek().map(|(_, s)| s.start).unwrap_or(0);
+
+            // Parse parameter pattern (for now, just identifier)
+            let pattern = match iter.next() {
+                Some((Token::Ident(name), span)) => Pattern::new(
+                    Span::new(file.clone(), span.start..span.end),
+                    PatternKind::Ident {
+                        name: name.clone(),
+                        mutable: false,
+                    },
+                ),
+                Some((t, span)) => {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken(t, vec![Token::Ident("".to_string())]),
+                        span,
+                        valid_syntax: vec!["parameter name".to_string()],
+                    });
+                }
+                None => {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedEOF,
+                        span: 0..0,
+                        valid_syntax: vec!["parameter".to_string()],
+                    });
+                }
+            };
+
+            // Expect colon
+            expect_token(iter, Token::Colon)?;
+
+            // Parse parameter type
+            let ty = parse_type(iter, file)?;
+
+            let param_end = iter.peek().map(|(_, s)| s.end).unwrap_or(param_start);
+            params.push(FnParam {
+                span: Span::new(file.clone(), param_start..param_end),
+                attributes: Vec::new(), // TODO: handle attributes
+                pattern,
+                ty,
+            });
+
+            if let Some((Token::Comma, _)) = iter.peek() {
+                iter.next(); // consume ','
+            } else {
+                break;
+            }
+        }
+        expect_token(iter, Token::RParen)?;
+    }
+
+    // Parse optional return type
+    let return_type = if let Some((Token::Arrow, _)) = iter.peek() {
+        iter.next(); // consume '->'
+        Some(parse_type(iter, file)?)
+    } else {
+        None
+    };
+
+    // Parse body
+    let body = if let Some((Token::Do, _)) = iter.peek() {
+        iter.next(); // consume 'do'
+        // Parse block body
+        let mut exprs = Vec::new();
+        loop {
+            if let Some((Token::End, _)) = iter.peek() {
+                iter.next(); // consume 'end'
+                break;
+            }
+            let expr = parse_expression(iter, file)?;
+            exprs.push(expr);
+        }
+        Some(Expr::new(
+            Span::new(file.clone(), 0..0), // TODO: proper span
+            ExprKind::Block { exprs },
+        ))
+    } else {
+        // Parse single expression body
+        Some(parse_expression(iter, file)?)
+    };
+
+    Ok(FnDecl {
+        span: Span::new(
+            file.clone(),
+            start_span..iter.peek().map(|(_, s)| s.end).unwrap_or(start_span),
+        ),
+        name,
+        generics,
+        params,
+        return_type,
+        body,
+        is_comptime: false, // TODO: handle comptime
+    })
 }
+
+
 
 pub fn parse_impl(_iter: &mut TokenIter, _file: &String) -> Result<ImplDecl, ParseError> {
     todo!()
@@ -1455,7 +1598,7 @@ end
     }
 
     #[test]
-    fn test_parse_struct_generic_constraints() {
+    fn test_parse_struct_with_generic_constraints() {
         // Note: Generic constraints parsing is not fully implemented yet
         // This test verifies the basic structure works
         let struct_decl = parse_single_struct("struct Wrapper<T>\n  value: T\nend").unwrap();
@@ -1464,6 +1607,60 @@ end
         match &struct_decl.generics[0].kind {
             GenericParamKind::Type { name, .. } => assert_eq!(name, "T"),
             _ => panic!("Expected Type generic param"),
+        }
+    }
+
+    fn parse_single_function(source: &str) -> Result<FnDecl, ParseError> {
+        let tokens = lex_without_comments(source).unwrap();
+        let token_pairs: Vec<(Token, Range<usize>)> =
+            tokens.into_iter().map(|s| (s.token, s.span)).collect();
+        let mut iter = token_pairs.into_iter().peekable();
+        // Skip the fn token
+        iter.next();
+        parse_function(&mut iter, &"<test>".to_string())
+    }
+
+    #[test]
+    fn test_parse_simple_function() {
+        let fn_decl = parse_single_function("fn add(a: int, b: int) -> int\n  a + b").unwrap();
+        assert_eq!(fn_decl.name, "add");
+        assert!(fn_decl.generics.is_empty());
+        assert_eq!(fn_decl.params.len(), 2);
+        assert_eq!(fn_decl.params[0].pattern.kind, PatternKind::Ident { name: "a".to_string(), mutable: false });
+        assert_eq!(fn_decl.params[1].pattern.kind, PatternKind::Ident { name: "b".to_string(), mutable: false });
+        assert!(fn_decl.return_type.is_some());
+        assert!(!fn_decl.is_comptime);
+        assert!(fn_decl.body.is_some());
+    }
+
+    #[test]
+    fn test_parse_function_with_generics() {
+        let fn_decl = parse_single_function("fn identity<T>(x: T) -> T\n  x").unwrap();
+        assert_eq!(fn_decl.name, "identity");
+        assert_eq!(fn_decl.generics.len(), 1);
+        assert_eq!(fn_decl.params.len(), 1);
+        assert!(fn_decl.return_type.is_some());
+        assert!(!fn_decl.is_comptime);
+    }
+
+    #[test]
+    fn test_parse_function_no_return_type() {
+        let fn_decl = parse_single_function("fn greet(name: string)\n  puts(\"Hello\")").unwrap();
+        assert_eq!(fn_decl.name, "greet");
+        assert!(fn_decl.return_type.is_none());
+        assert_eq!(fn_decl.params.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_function_with_block_body() {
+        let fn_decl = parse_single_function("fn complex(x: int) -> int do\n  x\n  1\nend").unwrap();
+        assert_eq!(fn_decl.name, "complex");
+        assert!(fn_decl.return_type.is_some());
+        assert!(fn_decl.body.is_some());
+        if let ExprKind::Block { exprs } = &fn_decl.body.as_ref().unwrap().kind {
+            assert_eq!(exprs.len(), 2);
+        } else {
+            panic!("Expected block body");
         }
     }
 }
