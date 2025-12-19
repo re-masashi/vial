@@ -1,5 +1,6 @@
 pub mod ast;
 pub mod lexer;
+pub mod parser;
 
 use std::fs;
 use std::path::Path;
@@ -11,7 +12,8 @@ pub fn run_file(file_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let source = fs::read_to_string(file_path)?;
-    let tokens = lexer::lex(&source).map_err(|pos| format!("Lexical error at position {}", pos))?;
+    let tokens = lexer::lex_without_comments(&source)
+        .map_err(|pos| format!("Lexical error at position {}", pos))?;
 
     println!("Running file: {}", file_path.display());
     println!("Tokens lexed: {}", tokens.len());

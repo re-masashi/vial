@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-use vial::{run_file, check_format, format_diff, format_current_dir, lint_fix, lint_files};
+use vial::{check_format, format_current_dir, format_diff, lint_files, lint_fix, run_file};
 
 #[derive(Parser)]
 #[command(name = "vial")]
