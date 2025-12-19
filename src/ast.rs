@@ -210,6 +210,12 @@ pub enum ExprKind {
         expr: Box<Expr>,
     },
 
+    // Runtime evaluation
+    Runtime {
+        runtime: Box<Expr>,
+        body: Box<Expr>,
+    },
+
     // Macro invocation
     MacroCall {
         name: String,
@@ -993,6 +999,10 @@ pub fn walk_expr<V: Visitor>(visitor: &mut V, expr: &Expr) {
         | ExprKind::Spawn { expr: base }
         | ExprKind::Comptime { expr: base } => {
             visitor.visit_expr(base);
+        }
+        ExprKind::Runtime { runtime, body } => {
+            visitor.visit_expr(runtime);
+            visitor.visit_expr(body);
         }
         ExprKind::Index { base, index } => {
             visitor.visit_expr(base);

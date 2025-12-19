@@ -165,7 +165,6 @@ Can be moved at most once. If not used, `drop` is called automatically.
 let uniq conn = connect()
 if needed do
   use(conn)  # moved, consumed
-end
 # if not moved, conn.drop() called at scope end
 ```
 
@@ -179,7 +178,6 @@ end
 impl Drop for Connection
   fn drop(mut self)
     self.close_internal()
-  end
 end
 ```
 
@@ -370,7 +368,6 @@ impl MapFunctor<Option>
       Option::Some(a) => Option::Some(f(a))
       Option::None => Option::None
     end
-  end
 end
 ```
 
@@ -426,13 +423,16 @@ end
 ## 11. Attributes
 
 ```ruby
+@derive(Show, Eq)
+struct Struct
+  # fields
+end
+
 @inline
 @test
-@derive(Show, Eq)
 @cfg(os = "linux")
 fn linux_only()
   # ...
-end
 ```
 
 ### 11.3 Field Attributes
@@ -531,7 +531,12 @@ end
 ```ruby
 fn main()
   puts("Hello")
-end
+```
+
+Or, 
+```ruby
+fn main(args: [string])
+  puts("Hello #{args[0]}")
 ```
 
 No top-level expressions.
@@ -554,7 +559,7 @@ enum Command
   Quit
 end
 
-fn main()
+fn main() do
   let user = User { name: "Alice", age: 30 }
   let cmd = Command::Greet(user)
 
