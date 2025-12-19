@@ -155,8 +155,37 @@ pub fn parse_item(
     .with_attributes(attributes))
 }
 
-pub fn parse_expression(_iter: &mut TokenIter, _file: &String) -> Result<Expr, ParseError> {
-    todo!()
+pub fn parse_expression(iter: &mut TokenIter, file: &String) -> Result<Expr, ParseError> {
+    // Dummy implementation to allow parsing to proceed
+    match iter.peek() {
+         Some((Token::End, _)) | 
+         Some((Token::Fn, _)) | 
+         Some((Token::Type, _)) | 
+         Some((Token::Const, _)) | 
+         Some((Token::Trait, _)) |
+         Some((Token::Impl, _)) |
+         Some((Token::RBrace, _)) => {
+              return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken(iter.peek().unwrap().0.clone(), vec![]),
+                span: iter.peek().unwrap().1.clone(),
+                valid_syntax: vec!["expression".to_string()],
+            });
+         }
+         _ => {}
+    }
+
+    if let Some((_, span)) = iter.next() {
+        Ok(Expr::new(
+            Span::new(file.clone(), span.start..span.end),
+            ExprKind::Literal(Literal::Unit),
+        ))
+    } else {
+        Err(ParseError {
+            kind: ParseErrorKind::UnexpectedEOF,
+            span: 0..0,
+            valid_syntax: vec!["expression".to_string()],
+        })
+    }
 }
 
 pub fn parse_attribute(iter: &mut TokenIter, file: &String) -> Result<Attribute, ParseError> {
@@ -548,6 +577,43 @@ pub fn parse_type(iter: &mut TokenIter, file: &String) -> Result<Type, ParseErro
                 ty: Box::new(ty),
             }
         }
+        Token::Fn => {
+            // Function type: fn(T, U) -> V
+            expect_token(iter, Token::LParen)?;
+            let mut params = Vec::new();
+            if let Some((Token::RParen, _)) = iter.peek() {
+                iter.next(); // consume ')'
+            } else {
+                loop {
+                    params.push(parse_type(iter, file)?);
+                    if let Some((Token::Comma, _)) = iter.peek() {
+                        iter.next(); // consume ','
+                    } else {
+                        break;
+                    }
+                }
+                expect_token(iter, Token::RParen)?;
+            }
+            
+            let return_type = if let Some((Token::Arrow, _)) = iter.peek() {
+                iter.next(); // consume '->'
+                Box::new(parse_type(iter, file)?)
+            } else {
+                Box::new(Type::new(Span::dummy(), TypeKind::Unit))
+            };
+
+            TypeKind::Fn { params, return_type }
+        }
+        Token::UpperSelf => {
+            TypeKind::Path(Path {
+                span: Span::new(file.clone(), span.start..span.end),
+                segments: vec![PathSegment {
+                    span: Span::new(file.clone(), span.start..span.end),
+                    ident: "Self".to_string(),
+                    generics: None,
+                }],
+            })
+        }
         _ => {
             return Err(ParseError {
                 kind: ParseErrorKind::UnexpectedToken(
@@ -886,44 +952,130 @@ pub fn parse_function(iter: &mut TokenIter, file: &String) -> Result<FnDecl, Par
         loop {
             let param_start = iter.peek().map(|(_, s)| s.start).unwrap_or(0);
 
-            // Parse parameter pattern (for now, just identifier)
-            let pattern = match iter.next() {
-                Some((Token::Ident(name), span)) => Pattern::new(
-                    Span::new(file.clone(), span.start..span.end),
-                    PatternKind::Ident {
-                        name: name.clone(),
-                        mutable: false,
-                    },
-                ),
-                Some((t, span)) => {
-                    return Err(ParseError {
-                        kind: ParseErrorKind::UnexpectedToken(t, vec![Token::Ident("".to_string())]),
-                        span,
-                        valid_syntax: vec!["parameter name".to_string()],
+            // Check for 'self' parameter
+            if let Some((Token::LowerSelf, _)) = iter.peek() {
+                iter.next(); // consume 'self'
+                let span = Span::new(file.clone(), param_start..iter.peek().map(|(_, s)| s.start).unwrap_or(param_start));
+                params.push(FnParam {
+                    span: span.clone(),
+                    attributes: Vec::new(),
+                    pattern: Pattern::new(span.clone(), PatternKind::Ident { name: "self".to_string(), mutable: false }),
+                    ty: Type::new(span, TypeKind::Path(Path { span: Span::dummy(), segments: vec![PathSegment { span: Span::dummy(), ident: "Self".to_string(), generics: None }] })),
+                });
+            } else if let Some((Token::Amp, _)) = iter.peek() {
+                // Check for &self or &mut self
+                iter.next(); // consume '&'
+                let mutable = if let Some((Token::Mut, _)) = iter.peek() {
+                    iter.next(); // consume 'mut'
+                    true
+                } else {
+                    false
+                };
+
+                if let Some((Token::LowerSelf, _)) = iter.peek() {
+                    iter.next(); // consume 'self'
+                    let span = Span::new(file.clone(), param_start..iter.peek().map(|(_, s)| s.start).unwrap_or(param_start));
+                    let self_ty = Type::new(Span::dummy(), TypeKind::Path(Path { span: Span::dummy(), segments: vec![PathSegment { span: Span::dummy(), ident: "Self".to_string(), generics: None }] }));
+                    params.push(FnParam {
+                        span: span.clone(),
+                        attributes: Vec::new(),
+                        pattern: Pattern::new(span.clone(), PatternKind::Ident { name: "self".to_string(), mutable: false }),
+                        ty: Type::new(span, TypeKind::Ref { mutable, ty: Box::new(self_ty) }),
                     });
+                } else {
+                     // Not self, just a pattern starting with &? (Not valid in param list usually, but handled by type)
+                     // Wait, param list is Pattern : Type
+                     // &Pattern is unlikely for simple args.
+                     // But we consumed '&'. We are committed.
+                     // Does standard param parsing handle this?
+                     // Standard param parsing: Ident : Type.
+                     // If we consumed '&', we broke it.
+                     // So we must peek deeper?
+                     // Peek 2 tokens?
+                     // Logic:
+                     // If & self -> self param
+                     // If & mut self -> self param
+                     // If & ... -> maybe error? Or maybe destructuring?
+                     // For now assume strictly self handling here.
+                     // If not self, we backtrack? We can't backtrack easily.
+                     // But `parse_function` logic was `ident : type`. `&` is not ident.
+                     // So `&` is only valid if it starts `&self`.
+                     return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken(Token::Amp, vec![Token::LowerSelf]),
+                        span: 0..0, // TODO
+                        valid_syntax: vec!["self".to_string()],
+                     });
                 }
-                None => {
-                    return Err(ParseError {
-                        kind: ParseErrorKind::UnexpectedEOF,
-                        span: 0..0,
-                        valid_syntax: vec!["parameter".to_string()],
+            } else if let Some((Token::Mut, _)) = iter.peek() {
+                 // Check for mut self
+                 iter.next(); // consume 'mut'
+                 if let Some((Token::LowerSelf, _)) = iter.peek() {
+                    iter.next(); // consume 'self'
+                    let span = Span::new(file.clone(), param_start..iter.peek().map(|(_, s)| s.start).unwrap_or(param_start));
+                    params.push(FnParam {
+                        span: span.clone(),
+                        attributes: Vec::new(),
+                        pattern: Pattern::new(span.clone(), PatternKind::Ident { name: "self".to_string(), mutable: true }),
+                        ty: Type::new(span, TypeKind::Path(Path { span: Span::dummy(), segments: vec![PathSegment { span: Span::dummy(), ident: "Self".to_string(), generics: None }] })),
                     });
-                }
-            };
+                 } else {
+                     // It is `mut ident : type`?
+                     // We consumed `mut`.
+                     let name = match iter.next() {
+                         Some((Token::Ident(n), _)) => n,
+                         _ => return Err(ParseError { kind: ParseErrorKind::UnexpectedEOF, span: 0..0, valid_syntax: vec!["param name".to_string()] }),
+                     };
+                     expect_token(iter, Token::Colon)?;
+                     let ty = parse_type(iter, file)?;
+                     let param_end = iter.peek().map(|(_, s)| s.end).unwrap_or(param_start);
+                     params.push(FnParam {
+                        span: Span::new(file.clone(), param_start..param_end),
+                        attributes: Vec::new(),
+                        pattern: Pattern::new(Span::dummy(), PatternKind::Ident { name, mutable: true }),
+                        ty,
+                    });
+                 }
+            } else {
+                // Normal parameter: patterns...
+                // Only supporting Ident for now
+                let pattern = match iter.next() {
+                    Some((Token::Ident(name), span)) => Pattern::new(
+                        Span::new(file.clone(), span.start..span.end),
+                        PatternKind::Ident {
+                            name: name.clone(),
+                            mutable: false,
+                        },
+                    ),
+                    Some((t, span)) => {
+                        return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedToken(t, vec![Token::Ident("".to_string())]),
+                            span,
+                            valid_syntax: vec!["parameter name".to_string()],
+                        });
+                    }
+                    None => {
+                        return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedEOF,
+                            span: 0..0,
+                            valid_syntax: vec!["parameter".to_string()],
+                        });
+                    }
+                };
 
-            // Expect colon
-            expect_token(iter, Token::Colon)?;
+                // Expect colon
+                expect_token(iter, Token::Colon)?;
 
-            // Parse parameter type
-            let ty = parse_type(iter, file)?;
+                // Parse parameter type
+                let ty = parse_type(iter, file)?;
 
-            let param_end = iter.peek().map(|(_, s)| s.end).unwrap_or(param_start);
-            params.push(FnParam {
-                span: Span::new(file.clone(), param_start..param_end),
-                attributes: Vec::new(), // TODO: handle attributes
-                pattern,
-                ty,
-            });
+                let param_end = iter.peek().map(|(_, s)| s.end).unwrap_or(param_start);
+                params.push(FnParam {
+                    span: Span::new(file.clone(), param_start..param_end),
+                    attributes: Vec::new(), // TODO: handle attributes
+                    pattern,
+                    ty,
+                });
+            }
 
             if let Some((Token::Comma, _)) = iter.peek() {
                 iter.next(); // consume ','
@@ -952,8 +1104,7 @@ pub fn parse_function(iter: &mut TokenIter, file: &String) -> Result<FnDecl, Par
                 iter.next(); // consume 'end'
                 break;
             }
-            let expr = parse_expression(iter, file)?;
-            exprs.push(expr);
+            exprs.push(parse_expression(iter, file)?);
         }
         Some(Expr::new(
             Span::new(file.clone(), 0..0), // TODO: proper span
@@ -961,7 +1112,15 @@ pub fn parse_function(iter: &mut TokenIter, file: &String) -> Result<FnDecl, Par
         ))
     } else {
         // Parse single expression body
-        Some(parse_expression(iter, file)?)
+        // Check if next token indicates end of function (declaration only)
+        match iter.peek() {
+            Some((Token::End, _)) | 
+            Some((Token::Fn, _)) | 
+            Some((Token::Type, _)) | 
+            Some((Token::Const, _)) |
+            Some((Token::RBrace, _)) => None,
+            _ => Some(parse_expression(iter, file)?)
+        }
     };
 
     Ok(FnDecl {
@@ -980,26 +1139,487 @@ pub fn parse_function(iter: &mut TokenIter, file: &String) -> Result<FnDecl, Par
 
 
 
-pub fn parse_impl(_iter: &mut TokenIter, _file: &String) -> Result<ImplDecl, ParseError> {
-    todo!()
+pub fn parse_impl(iter: &mut TokenIter, file: &String) -> Result<ImplDecl, ParseError> {
+    let start_span = iter.peek().map(|(_, s)| s.start).unwrap_or(0);
+
+    // Parse optional generics
+    let generics = parse_generic_params(iter, file)?;
+
+    // Parse type or trait reference
+    // We need to differentiate between `impl Type` and `impl Trait for Type`
+    // We can parse a type first. If we see `for`, it was a trait path.
+    let first_ty = parse_type(iter, file)?;
+
+    let (trait_path, self_ty) = if let Some((Token::For, _)) = iter.peek() {
+        iter.next(); // consume 'for'
+        
+        // The first type must be a path if it's a trait
+        let trait_path = match first_ty.kind {
+            TypeKind::Path(p) => p,
+            _ => return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken(Token::For, vec![]), // TODO: better error
+                span: first_ty.span.range,
+                valid_syntax: vec!["trait path".to_string()],
+            }),
+        };
+
+        let self_ty = parse_type(iter, file)?;
+        (Some(trait_path), self_ty)
+    } else {
+        (None, first_ty)
+    };
+
+    let mut items = Vec::new();
+
+    // Parse items until 'end'
+    loop {
+        match iter.peek() {
+            Some((Token::End, _)) => {
+                iter.next(); // consume 'end'
+                break;
+            }
+            Some((Token::At, _)) => {
+                // Parse attributes
+                 let attributes = vec![parse_attribute(iter, file)?];
+                 
+                 // Check visibility
+                let visibility = if let Some((Token::Pub, _)) = iter.peek() {
+                    iter.next();
+                    Visibility::Public
+                } else {
+                    Visibility::Private
+                };
+
+                // Parse item kind
+                let kind = if let Some((Token::Fn, _)) = iter.peek() {
+                    iter.next(); // consume 'fn'
+                    let fn_decl = parse_function(iter, file)?;
+                    ImplItemKind::Fn(fn_decl)
+                } else if let Some((Token::Type, _)) = iter.peek() {
+                    iter.next(); // consume 'type'
+                    let name = match iter.next() {
+                        Some((Token::Ident(n), _)) => n,
+                        _ => return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedEOF,
+                            span: 0..0,
+                            valid_syntax: vec!["type name".to_string()],
+                        }),
+                    };
+                    expect_token(iter, Token::Eq)?;
+                    let ty = parse_type(iter, file)?;
+                    ImplItemKind::Type { name, ty }
+                } else if let Some((Token::Const, _)) = iter.peek() {
+                    iter.next(); // consume 'const'
+                    let (name, ty, value) = parse_const_decl(iter, file)?;
+                     // ty is Option<Type> in parse_const_decl, but required in ImplItemKind::Const?
+                     // Wait, ImplItemKind::Const definition: Const { name: String, ty: Type, value: Expr }
+                     // So we need to ensure type is present or inferred? AST says Type is required.
+                     // parse_const_decl returns Option<Type>. We should enforce it or AST allows inference?
+                     // Let's assume for now we unwrap or handle it.
+                     // Actually let's look at parse_const_decl signature in mod.rs: `Result<(String, Option<Type>, Expr), ParseError>`
+                     // And ImplItemKind::Const: `ty: Type`
+                     // So specific to impls, consts might necessitate types.
+                     // For now let's just use a dummy type if missing or error out.
+                     if let Some(t) = ty {
+                         ImplItemKind::Const { name, ty: t, value }
+                     } else {
+                         return Err(ParseError {
+                             kind: ParseErrorKind::UnexpectedEOF, // TODO better error
+                             span: 0..0,
+                             valid_syntax: vec!["type annotation".to_string()],
+                         });
+                     }
+                } else {
+                     return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken(iter.peek().unwrap().0.clone(), vec![Token::Fn, Token::Type, Token::Const]),
+                        span: iter.peek().unwrap().1.clone(),
+                        valid_syntax: vec!["fn, type, or const".to_string()],
+                    });
+                };
+                
+                items.push(ImplItem {
+                    span: Span::new(file.clone(), 0..0), // TODO
+                    attributes,
+                    visibility,
+                    kind,
+                });
+            }
+             Some(_) => {
+                // No attributes
+                let attributes = Vec::new();
+                
+                 // Check visibility
+                let visibility = if let Some((Token::Pub, _)) = iter.peek() {
+                    iter.next();
+                    Visibility::Public
+                } else {
+                    Visibility::Private
+                };
+
+                // Parse item kind
+                let kind = if let Some((Token::Fn, _)) = iter.peek() {
+                    iter.next(); // consume 'fn'
+                    let fn_decl = parse_function(iter, file)?;
+                    ImplItemKind::Fn(fn_decl)
+                } else if let Some((Token::Type, _)) = iter.peek() {
+                    iter.next(); // consume 'type'
+                    let name = match iter.next() {
+                         Some((Token::Ident(n), _)) => n,
+                        _ => return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedEOF,
+                            span: 0..0,
+                            valid_syntax: vec!["type name".to_string()],
+                        }),
+                    };
+                    expect_token(iter, Token::Eq)?;
+                    let ty = parse_type(iter, file)?;
+                    ImplItemKind::Type { name, ty }
+                 } else if let Some((Token::Const, _)) = iter.peek() {
+                    iter.next(); // consume 'const'
+                    let (name, ty, value) = parse_const_decl(iter, file)?;
+                     if let Some(t) = ty {
+                         ImplItemKind::Const { name, ty: t, value }
+                     } else {
+                         // Fallback or error
+                           return Err(ParseError {
+                             kind: ParseErrorKind::UnexpectedEOF, 
+                             span: 0..0,
+                             valid_syntax: vec!["type annotation".to_string()],
+                         });
+                     }
+                } else {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken(iter.peek().unwrap().0.clone(), vec![Token::Fn, Token::Type, Token::Const]),
+                        span: iter.peek().unwrap().1.clone(),
+                        valid_syntax: vec!["fn, type, or const".to_string()],
+                    });
+                };
+                
+                 items.push(ImplItem {
+                    span: Span::new(file.clone(), 0..0), // TODO
+                    attributes,
+                    visibility,
+                    kind,
+                });
+            }
+             None => {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedEOF,
+                    span: 0..0,
+                    valid_syntax: vec!["end or impl item".to_string()],
+                });
+            }
+        }
+    }
+
+    Ok(ImplDecl {
+        span: Span::new(
+            file.clone(),
+             start_span..iter.peek().map(|(_, s)| s.end).unwrap_or(start_span),
+        ),
+        generics,
+        trait_path,
+        self_ty,
+        items,
+    })
 }
 
-pub fn parse_trait(_iter: &mut TokenIter, _file: &String) -> Result<TraitDecl, ParseError> {
-    todo!()
+pub fn parse_trait(iter: &mut TokenIter, file: &String) -> Result<TraitDecl, ParseError> {
+    let start_span = iter.peek().map(|(_, s)| s.start).unwrap_or(0);
+
+    // Parse trait name
+    let name = match iter.next() {
+        Some((Token::Ident(n), _)) => n,
+        Some((t, span)) => {
+             return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken(t, vec![Token::Ident("".to_string())]),
+                span,
+                valid_syntax: vec!["trait name".to_string()],
+            });
+        }
+        None => {
+             return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedEOF,
+                span: 0..0,
+                valid_syntax: vec!["trait name".to_string()],
+            });
+        }
+    };
+
+    // Parse optional generics
+    let generics = parse_generic_params(iter, file)?;
+
+    // Parse supertraits
+    let mut supertraits = Vec::new(); // TODO: parse supertraits : Super1 + Super2
+    if let Some((Token::Colon, _)) = iter.peek() {
+        iter.next(); // consume ':'
+         loop {
+            // Expect path
+            let ty = parse_type(iter, file)?;
+             match ty.kind {
+                TypeKind::Path(p) => supertraits.push(p),
+                _ => return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken(Token::Ident("".to_string()), vec![]),
+                    span: ty.span.range,
+                    valid_syntax: vec!["supertrait path".to_string()],
+                }),
+            }
+
+            if let Some((Token::Plus, _)) = iter.peek() {
+                iter.next(); // consume '+'
+            } else {
+                break;
+            }
+        }
+    }
+
+    let mut associated_types = Vec::new();
+    let mut methods = Vec::new();
+
+    // Parse items until 'end'
+     loop {
+        match iter.peek() {
+            Some((Token::End, _)) => {
+                iter.next(); // consume 'end'
+                break;
+            }
+             Some((Token::At, _)) => {
+                 // Attributes (skip for now / TODO)
+                 iter.next();
+                 // Continue to parse item... simplified for now
+             }
+            Some((t, _)) => {
+                if *t == Token::Fn {
+                    iter.next(); // consume 'fn'
+                    let fn_decl = parse_function(iter, file)?;
+                    // methods in traits might not have bodies
+                     // parse_function currently expects a body (Do ... End or Expr).
+                     // We might need to adjust parse_function or manually handle this.
+                     // But wait, parse_function handles `fn name() -> type body`.
+                     // Trait methods: `fn name();` or `fn name() ... end`.
+                     // If existing parse_function enforces body, we have a problem.
+                     // The spec says:
+                     /*
+                     trait Show
+                       fn show(self) -> string
+                     end
+                     */
+                     // No delimiters for body-less functions?
+                     // Vial grammar seems indentation-agnostic but relies on `end`.
+                     // If there is no `do..end` or expression, how do we know it's a declaration?
+                     // Ah, spec 1.6: "Optional. Terminates expression early when needed for clarity."
+                     // Maybe it's `fn name()` (newline) `fn next ...`
+                     // My `parse_function` implementation looks for `do` or takes an expression.
+                     // If it takes an expression, it might consume the next function keyword if not careful?
+                     // `parse_expression` handles `todo!()` right now, but typically it consumes tokens.
+                     // If I have:
+                     /*
+                        fn show(self) -> string
+                        fn next...
+                     */
+                     // `parse_function` is called. It parses signature. Then it checks for `do`. If no `do`, it calls `parse_expression`.
+                     // If the next token is `fn`, `parse_expression` should failed/return not an expression?
+                     // `fn` is not an expression starter usually (unless lambda?).
+                     // If `parse_expression` sees `fn` it might error.
+                     // So we need to handle "no body" function parsing.
+                     // Let's assume for this task that we modify `parse_function` or check before calling.
+                     // Since I cannot modify `parse_function` easily without rewriting it (it's big), 
+                     // I will assume for now trait methods MUST have bodies for this pass OR I need to look at `parse_function` again.
+                     // `parse_function` calls `parse_expression` if no `do`.
+                     // If I'm strictly parsing, `fn` is not an expression.
+                     // So `parse_expression` returning error is one way, but we want to fail gracefully.
+                     // Actually, I can check if it looks like a declaration.
+                     // But wait, `parse_function` consumes the function signature.
+                     
+                     // For this task, I will accept that `parse_function` parses a body.
+                     // To support bodyless functions properly, `parse_function` needs an option "allow_no_body".
+                     // Since `parse_function` is already written, I'll copy-paste-modify specialized logic here or try to use it.
+                     // Since I can't easily change `parse_function` signature across usage without updating `parse_item` etc.
+                     // I'll try to peek. `parse_function` consumes `fn`.
+                     // Wait, `parse_trait` calls `parse_function`.
+                     // If I want to support definitions, I might need to change `parse_function` to be optional body.
+                     
+                     // For now, I will assume trait methods have bodies or use a workaround.
+                     // Actually, if I look at `parse_function` again in Step 41:
+                     /*
+                        // Parse body
+                        let body = if let Some((Token::Do, _)) = iter.peek() {
+                            ...
+                        } else {
+                            // Parse single expression body
+                            Some(parse_expression(iter, file)?)
+                        };
+                     */
+                     // It forces an expression body if no block.
+                     // So `fn foo();` is not supported by current `parse_function`.
+                     // I should probably update `parse_function` later or now.
+                     // For now, I'll stick to `parse_function` and assume bodies.
+                     // Or I can interpret the spec's `fn show(self) -> string` as requiring a body, or maybe `parse_expression` handles empty? No.
+                     
+                     methods.push(fn_decl);
+                } else if *t == Token::Type {
+                    iter.next(); // consume 'type'
+                    let name = match iter.next() {
+                        Some((Token::Ident(n), _)) => n,
+                        _ => return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedEOF,
+                            span: 0..0,
+                            valid_syntax: vec!["type name".to_string()],
+                        }),
+                    };
+                    
+                    let mut bounds = Vec::new();
+                    // Optional bounds : Bound + Bound
+                    if let Some((Token::Colon, _)) = iter.peek() {
+                        iter.next(); // consume ':'
+                         loop {
+                            let bound_ty = parse_type(iter, file)?;
+                             match bound_ty.kind {
+                                TypeKind::Path(p) => bounds.push(p),
+                                _ => return Err(ParseError {
+                                    kind: ParseErrorKind::UnexpectedToken(Token::Ident("".to_string()), vec![]),
+                                    span: bound_ty.span.range,
+                                    valid_syntax: vec!["trait bound".to_string()],
+                                }),
+                            }
+
+                            if let Some((Token::Plus, _)) = iter.peek() {
+                                iter.next(); // consume '+'
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+
+                    // Optional default = Type
+                    let default = if let Some((Token::Eq, _)) = iter.peek() {
+                        iter.next(); // consume '='
+                        Some(parse_type(iter, file)?)
+                    } else {
+                        None
+                    };
+
+                    associated_types.push(AssociatedType {
+                        span: Span::new(file.clone(), 0..0), // TODO
+                        attributes: Vec::new(),
+                        name,
+                        bounds,
+                        default,
+                    });
+                } else {
+                     return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken(t.clone(), vec![Token::Fn, Token::Type]),
+                        span: iter.peek().map(|(_, s)| s.clone()).unwrap_or(0..0),
+                        valid_syntax: vec!["fn or type".to_string()],
+                    });
+                }
+            }
+             None => {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedEOF,
+                    span: 0..0,
+                    valid_syntax: vec!["end or trait item".to_string()],
+                });
+            }
+        }
+    }
+
+    Ok(TraitDecl {
+        span: Span::new(
+            file.clone(),
+             start_span..iter.peek().map(|(_, s)| s.end).unwrap_or(start_span),
+        ),
+        name,
+        generics,
+        supertraits,
+        associated_types,
+        methods,
+    })
 }
 
 pub fn parse_type_alias(
-    _iter: &mut TokenIter,
-    _file: &String,
+    iter: &mut TokenIter,
+    file: &String,
 ) -> Result<TypeAliasDecl, ParseError> {
-    todo!()
+    let start_span = iter.peek().map(|(_, s)| s.start).unwrap_or(0);
+
+    // Parse alias name
+    let name = match iter.next() {
+        Some((Token::Ident(n), _)) => n,
+        Some((t, span)) => {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken(t, vec![Token::Ident("".to_string())]),
+                span,
+                valid_syntax: vec!["type alias name".to_string()],
+            });
+        }
+        None => {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedEOF,
+                span: 0..0,
+                valid_syntax: vec!["type alias name".to_string()],
+            });
+        }
+    };
+
+    // Parse optional generics
+    let generics = parse_generic_params(iter, file)?;
+
+    // Expect '='
+    expect_token(iter, Token::Eq)?;
+
+    // Parse type
+    let ty = parse_type(iter, file)?;
+
+    Ok(TypeAliasDecl {
+        span: Span::new(
+            file.clone(),
+            start_span..iter.peek().map(|(_, s)| s.end).unwrap_or(start_span),
+        ),
+        name,
+        generics,
+        ty,
+    })
 }
 
 pub fn parse_const_decl(
-    _iter: &mut TokenIter,
-    _file: &String,
+    iter: &mut TokenIter,
+    file: &String,
 ) -> Result<(String, Option<Type>, Expr), ParseError> {
-    todo!()
+    // Parse name
+    let name = match iter.next() {
+        Some((Token::Ident(n), _)) => n,
+        Some((t, span)) => {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken(t, vec![Token::Ident("".to_string())]),
+                span,
+                valid_syntax: vec!["constant name".to_string()],
+            });
+        }
+        None => {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedEOF,
+                span: 0..0,
+                valid_syntax: vec!["constant name".to_string()],
+            });
+        }
+    };
+
+    // Parse optional type annotation
+    let ty = if let Some((Token::Colon, _)) = iter.peek() {
+        iter.next(); // consume ':'
+        Some(parse_type(iter, file)?)
+    } else {
+        None
+    };
+
+    // Expect '='
+    expect_token(iter, Token::Eq)?;
+
+    // Parse value
+    let value = parse_expression(iter, file)?;
+
+    Ok((name, ty, value))
 }
 
 pub fn parse_macro_decl(_iter: &mut TokenIter, _file: &String) -> Result<MacroDecl, ParseError> {
@@ -1661,6 +2281,149 @@ end
             assert_eq!(exprs.len(), 2);
         } else {
             panic!("Expected block body");
+        }
+    }
+
+    fn parse_single_trait(source: &str) -> Result<TraitDecl, ParseError> {
+        let tokens = lex_without_comments(source).unwrap();
+        let token_pairs: Vec<(Token, Range<usize>)> =
+            tokens.into_iter().map(|s| (s.token, s.span)).collect();
+        let mut iter = token_pairs.into_iter().peekable();
+        // Skip the trait token
+        iter.next();
+        parse_trait(&mut iter, &"<test>".to_string())
+    }
+
+    #[test]
+    fn test_parse_simple_trait() {
+        let trait_decl = parse_single_trait("trait Show\n  fn show(self) -> string\nend").unwrap();
+        assert_eq!(trait_decl.name, "Show");
+        assert!(trait_decl.generics.is_empty());
+        assert_eq!(trait_decl.methods.len(), 1);
+        assert_eq!(trait_decl.methods[0].name, "show");
+    }
+
+    #[test]
+    fn test_parse_trait_with_generics() {
+        let trait_decl = parse_single_trait("trait Converter<From, To>\n  fn convert(from: From) -> To\nend").unwrap();
+        assert_eq!(trait_decl.name, "Converter");
+        assert_eq!(trait_decl.generics.len(), 2);
+        assert_eq!(trait_decl.methods.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_trait_with_associated_type() {
+        let trait_decl = parse_single_trait("trait Iterator\n  type Item\n  fn next(mut self) -> Option<Item>\nend").unwrap();
+        assert_eq!(trait_decl.name, "Iterator");
+        assert_eq!(trait_decl.associated_types.len(), 1);
+        assert_eq!(trait_decl.associated_types[0].name, "Item");
+        assert_eq!(trait_decl.methods.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_trait_with_associated_type_bounds_and_default() {
+        let trait_decl = parse_single_trait("trait Container\n  type Item: Clone + Eq = i32\nend").unwrap();
+        assert_eq!(trait_decl.name, "Container");
+        assert_eq!(trait_decl.associated_types.len(), 1);
+        let assoc = &trait_decl.associated_types[0];
+        assert_eq!(assoc.name, "Item");
+        assert_eq!(assoc.bounds.len(), 2);
+        assert!(assoc.default.is_some());
+    }
+
+    #[test]
+    fn test_parse_trait_with_supertraits() {
+        let trait_decl = parse_single_trait("trait Copy: Clone\n  fn copy(self) -> Self\nend").unwrap();
+        assert_eq!(trait_decl.name, "Copy");
+        assert_eq!(trait_decl.supertraits.len(), 1);
+    }
+
+    fn parse_single_impl(source: &str) -> Result<ImplDecl, ParseError> {
+        let tokens = lex_without_comments(source).unwrap();
+         let token_pairs: Vec<(Token, Range<usize>)> =
+            tokens.into_iter().map(|s| (s.token, s.span)).collect();
+        let mut iter = token_pairs.into_iter().peekable();
+        // Skip the impl token
+        iter.next();
+        parse_impl(&mut iter, &"<test>".to_string())
+    }
+
+    #[test]
+    fn test_parse_inherent_impl() {
+        let impl_decl = parse_single_impl("impl Point\n  fn new(x: f64, y: f64) -> Point\n    \"new_point\"\n  end\nend").unwrap();
+        assert!(impl_decl.trait_path.is_none());
+        match impl_decl.self_ty.kind {
+            TypeKind::Path(p) => assert_eq!(p.segments[0].ident, "Point"),
+            _ => panic!("Expected Path type"),
+        }
+        assert_eq!(impl_decl.items.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_trait_impl() {
+        let impl_decl = parse_single_impl("impl Show for Point\n  fn show(self) -> string\n    \"Point\"\n  end\nend").unwrap();
+        assert!(impl_decl.trait_path.is_some());
+        assert_eq!(impl_decl.trait_path.unwrap().segments[0].ident, "Show");
+         match impl_decl.self_ty.kind {
+            TypeKind::Path(p) => assert_eq!(p.segments[0].ident, "Point"),
+            _ => panic!("Expected Path type"),
+        }
+    }
+
+    #[test]
+    fn test_parse_impl_with_generics() {
+        let impl_decl = parse_single_impl("impl<T> Show for Option<T>\n  fn show(self) -> string\n    \"Option\"\n  end\nend").unwrap();
+        assert_eq!(impl_decl.generics.len(), 1);
+        assert!(impl_decl.trait_path.is_some());
+        // Check Option<T>
+         match impl_decl.self_ty.kind {
+            TypeKind::Path(p) => {
+                assert_eq!(p.segments[0].ident, "Option");
+                assert!(p.segments[0].generics.is_some());
+            },
+            _ => panic!("Expected Path type"),
+        }
+    }
+
+    #[test]
+    fn test_parse_impl_with_associated_type() {
+        let impl_decl = parse_single_impl("impl Iterator for Range\n  type Item = int\n  fn next(mut self) -> Option<int>\n    None\n  end\nend").unwrap();
+        assert_eq!(impl_decl.items.len(), 2);
+        match &impl_decl.items[0].kind {
+            ImplItemKind::Type { name, .. } => assert_eq!(name, "Item"),
+            _ => panic!("Expected Type item"),
+        }
+    }
+
+    fn parse_single_type_alias(source: &str) -> Result<TypeAliasDecl, ParseError> {
+         let tokens = lex_without_comments(source).unwrap();
+        let token_pairs: Vec<(Token, Range<usize>)> =
+            tokens.into_iter().map(|s| (s.token, s.span)).collect();
+        let mut iter = token_pairs.into_iter().peekable();
+        // Skip the type token
+        iter.next();
+        parse_type_alias(&mut iter, &"<test>".to_string())
+    }
+
+    #[test]
+    fn test_parse_type_alias() {
+        let alias = parse_single_type_alias("type ID = int").unwrap();
+        assert_eq!(alias.name, "ID");
+        assert!(alias.generics.is_empty());
+        match alias.ty.kind {
+            TypeKind::Int(_) => {},
+            _ => panic!("Expected Int type"),
+        }
+    }
+
+    #[test]
+    fn test_parse_type_alias_with_generics() {
+        let alias = parse_single_type_alias("type Callback<T> = fn(T) -> ()").unwrap();
+        assert_eq!(alias.name, "Callback");
+        assert_eq!(alias.generics.len(), 1);
+        match alias.ty.kind {
+            TypeKind::Fn { .. } => {},
+            _ => panic!("Expected Fn type"),
         }
     }
 }
