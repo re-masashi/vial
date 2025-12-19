@@ -2,7 +2,7 @@
 
 Vial aims to be a concurrent, safe, and performant programming language.
 
-## Features
+## (Planned) Features
 
 - Structured concurrency with swappable schedulers
 - Generational GC with escape analysis (stack allocation when possible)
