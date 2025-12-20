@@ -155,8 +155,171 @@ pub fn parse_item(
     .with_attributes(attributes))
 }
 
-pub fn parse_expression(_iter: &mut TokenIter, _file: &String) -> Result<Expr, ParseError> {
-    todo!()
+pub fn parse_expression(iter: &mut TokenIter, file: &String) -> Result<Expr, ParseError> {
+    let start_span = iter.peek().map(|(_, s)| s.start).unwrap_or(0);
+
+    let (token, span) = iter.next().ok_or(ParseError {
+        kind: ParseErrorKind::UnexpectedEOF,
+        span: 0..0,
+        valid_syntax: vec!["expression".to_string()],
+    })?;
+
+    let kind = match token {
+        Token::Int(s) => {
+            // Parse int suffix if present
+            let (value, suffix) = if let Some(suffix_str) = parse_int_suffix(&s) {
+                let val_end = s.len() - suffix_str.len();
+                (s[..val_end].to_string(), Some(suffix_str))
+            } else {
+                (s.clone(), None)
+            };
+
+            let int_type = suffix.map(|s| match s.as_str() {
+                "i8" => IntType::I8,
+                "i16" => IntType::I16,
+                "i32" => IntType::I32,
+                "i64" => IntType::I64,
+                "int" => IntType::Int,
+                "u8" => IntType::U8,
+                "u16" => IntType::U16,
+                "u32" => IntType::U32,
+                "u64" => IntType::U64,
+                "uint" => IntType::Uint,
+                _ => IntType::Int, // fallback
+            });
+
+            ExprKind::Literal(Literal::Int {
+                value,
+                suffix: int_type,
+            })
+        }
+        Token::Float(s) => {
+            // Parse float suffix if present
+            let (value, suffix) = if s.ends_with("f32") {
+                (s[..s.len() - 3].to_string(), Some(FloatType::F32))
+            } else if s.ends_with("f64") {
+                (s[..s.len() - 3].to_string(), Some(FloatType::F64))
+            } else {
+                (s.clone(), None)
+            };
+
+            ExprKind::Literal(Literal::Float { value, suffix })
+        }
+        Token::String(s) => ExprKind::Literal(Literal::String(s)),
+        Token::Char(s) => ExprKind::Literal(Literal::Char(s)),
+        Token::True => ExprKind::Literal(Literal::Bool(true)),
+        Token::False => ExprKind::Literal(Literal::Bool(false)),
+        Token::Ident(s) => ExprKind::Ident(s),
+        Token::LParen => {
+            // Tuple or unit
+            if let Some((Token::RParen, _)) = iter.peek() {
+                iter.next(); // consume ')'
+                ExprKind::Literal(Literal::Unit)
+            } else {
+                let mut elements = Vec::new();
+                loop {
+                    elements.push(parse_expression(iter, file)?);
+                    if let Some((Token::Comma, _)) = iter.peek() {
+                        iter.next(); // consume ','
+                    } else {
+                        break;
+                    }
+                }
+                expect_token(iter, Token::RParen)?;
+                if elements.len() == 1 {
+                    // Single element tuple is just the expression
+                    return Ok(elements.into_iter().next().unwrap());
+                } else {
+                    ExprKind::Tuple { elements }
+                }
+            }
+        }
+        Token::LBracket => {
+            // Array
+            let mut elements = Vec::new();
+            if let Some((Token::RBracket, _)) = iter.peek() {
+                iter.next(); // consume ']'
+            } else {
+                loop {
+                    elements.push(parse_expression(iter, file)?);
+                    if let Some((Token::Comma, _)) = iter.peek() {
+                        iter.next(); // consume ','
+                    } else {
+                        break;
+                    }
+                }
+                expect_token(iter, Token::RBracket)?;
+            }
+            ExprKind::Array { elements }
+        }
+        Token::Minus => {
+            // Unary minus
+            let expr = parse_expression(iter, file)?;
+            ExprKind::Unary {
+                op: UnOp::Neg,
+                expr: Box::new(expr),
+            }
+        }
+        Token::Not => {
+            // Logical not
+            let expr = parse_expression(iter, file)?;
+            ExprKind::Unary {
+                op: UnOp::Not,
+                expr: Box::new(expr),
+            }
+        }
+        Token::Amp => {
+            // Reference
+            let mutable = if let Some((Token::Mut, _)) = iter.peek() {
+                iter.next(); // consume 'mut'
+                true
+            } else {
+                false
+            };
+            let expr = parse_expression(iter, file)?;
+            ExprKind::Unary {
+                op: if mutable { UnOp::RefMut } else { UnOp::Ref },
+                expr: Box::new(expr),
+            }
+        }
+        Token::AmpMut => {
+            // Mutable reference
+            let expr = parse_expression(iter, file)?;
+            ExprKind::Unary {
+                op: UnOp::RefMut,
+                expr: Box::new(expr),
+            }
+        }
+        _ => {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken(
+                    token,
+                    vec![
+                        Token::Int("".to_string()),
+                        Token::Float("".to_string()),
+                        Token::String("".to_string()),
+                        Token::Char("".to_string()),
+                        Token::True,
+                        Token::False,
+                        Token::Ident("".to_string()),
+                        Token::LParen,
+                        Token::LBracket,
+                        Token::Minus,
+                        Token::Not,
+                        Token::Amp,
+                        Token::AmpMut,
+                    ],
+                ),
+                span,
+                valid_syntax: vec!["literal or identifier".to_string()],
+            });
+        }
+    };
+
+    Ok(Expr::new(
+        Span::new(file.clone(), start_span..iter.peek().map(|(_, s)| s.end).unwrap_or(start_span)),
+        kind,
+    ))
 }
 
 pub fn parse_attribute(iter: &mut TokenIter, file: &String) -> Result<Attribute, ParseError> {
@@ -1740,8 +1903,141 @@ fn parse_generic_params(
     Ok(generics)
 }
 
-pub fn parse_use(_iter: &mut TokenIter, _file: &String) -> Result<UseDecl, ParseError> {
-    todo!()
+pub fn parse_use(iter: &mut TokenIter, file: &String) -> Result<UseDecl, ParseError> {
+    let start_span = iter.peek().map(|(_, s)| s.start).unwrap_or(0);
+
+    // Parse path (string literal)
+    let path = match iter.next() {
+        Some((Token::String(s), _)) => s,
+        Some((t, span)) => {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken(t, vec![Token::String("".to_string())]),
+                span,
+                valid_syntax: vec!["string literal for path".to_string()],
+            });
+        }
+        None => {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedEOF,
+                span: 0..0,
+                valid_syntax: vec!["use path".to_string()],
+            });
+        }
+    };
+
+    // Parse optional items (.name, .*, .{name1, name2})
+    let items = if let Some((Token::Dot, _)) = iter.peek() {
+        iter.next(); // consume '.'
+        match iter.next() {
+            Some((Token::Star, _)) => UseItems::All,
+            Some((Token::Ident(name), _)) => UseItems::Single(name),
+            Some((Token::LBrace, _)) => {
+                let mut names = Vec::new();
+                loop {
+                    match iter.next() {
+                        Some((Token::Ident(name), _)) => names.push(name),
+                        Some((t, span)) => {
+                            return Err(ParseError {
+                                kind: ParseErrorKind::UnexpectedToken(
+                                    t,
+                                    vec![Token::Ident("".to_string())],
+                                ),
+                                span,
+                                valid_syntax: vec!["identifier".to_string()],
+                            });
+                        }
+                        None => {
+                            return Err(ParseError {
+                                kind: ParseErrorKind::UnexpectedEOF,
+                                span: 0..0,
+                                valid_syntax: vec!["identifier or closing brace".to_string()],
+                            });
+                        }
+                    }
+                    match iter.peek() {
+                        Some((Token::Comma, _)) => {
+                            iter.next(); // consume ','
+                        }
+                        Some((Token::RBrace, _)) => {
+                            iter.next(); // consume '}'
+                            break;
+                        }
+                        Some((t, span)) => {
+                            return Err(ParseError {
+                                kind: ParseErrorKind::UnexpectedToken(
+                                    t.clone(),
+                                    vec![Token::Comma, Token::RBrace],
+                                ),
+                                span: span.clone(),
+                                valid_syntax: vec!["comma or closing brace".to_string()],
+                            });
+                        }
+                        None => {
+                            return Err(ParseError {
+                                kind: ParseErrorKind::UnexpectedEOF,
+                                span: 0..0,
+                                valid_syntax: vec!["comma or closing brace".to_string()],
+                            });
+                        }
+                    }
+                }
+                UseItems::Multiple(names)
+            }
+            Some((t, span)) => {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken(
+                        t,
+                        vec![Token::Star, Token::Ident("".to_string()), Token::LBrace],
+                    ),
+                    span,
+                    valid_syntax: vec!["*, identifier, or {list}".to_string()],
+                });
+            }
+            None => {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedEOF,
+                    span: 0..0,
+                    valid_syntax: vec!["*, identifier, or {list}".to_string()],
+                });
+            }
+        }
+    } else {
+        UseItems::None
+    };
+
+    // Parse optional alias (as name)
+    let alias = if let Some((Token::As, _)) = iter.peek() {
+        iter.next(); // consume 'as'
+        match iter.next() {
+            Some((Token::Ident(name), _)) => Some(name),
+            Some((t, span)) => {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken(t, vec![Token::Ident("".to_string())]),
+                    span,
+                    valid_syntax: vec!["alias name".to_string()],
+                });
+            }
+            None => {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedEOF,
+                    span: 0..0,
+                    valid_syntax: vec!["alias name".to_string()],
+                });
+            }
+        }
+    } else {
+        None
+    };
+
+    Ok(UseDecl {
+        span: Span::new(
+            file.clone(),
+            start_span..iter.peek().map(|(_, s)| s.end).unwrap_or(start_span),
+        ),
+        path,
+        alias,
+        items,
+    })
 }
 
 #[cfg(test)]
@@ -2436,6 +2732,127 @@ end
         // Skip the type token
         iter.next();
         parse_type_alias(&mut iter, &"<test>".to_string())
+    }
+
+    fn parse_single_item(source: &str) -> Result<Item, ParseError> {
+        let tokens = lex_without_comments(source).unwrap();
+        let token_pairs: Vec<(Token, Range<usize>)> =
+            tokens.into_iter().map(|s| (s.token, s.span)).collect();
+        let mut iter = token_pairs.into_iter().peekable();
+        parse_item(&mut iter, &"<test>".to_string(), Vec::new())
+    }
+
+    #[test]
+    fn test_parse_const() {
+        let item = parse_single_item("const PI = 3.14159").unwrap();
+        match &item.kind {
+            ItemKind::Const { name, ty, value } => {
+                assert_eq!(name, "PI");
+                assert!(ty.is_none());
+                match &value.kind {
+                    ExprKind::Literal(Literal::Float { value, suffix }) => {
+                        assert_eq!(value, "3.14159");
+                        assert!(suffix.is_none());
+                    }
+                    _ => panic!("Expected float literal"),
+                }
+            }
+            _ => panic!("Expected const item"),
+        }
+    }
+
+    #[test]
+    fn test_parse_const_with_type() {
+        let item = parse_single_item("const MAX: int = 100").unwrap();
+        match &item.kind {
+            ItemKind::Const { name, ty, value } => {
+                assert_eq!(name, "MAX");
+                assert!(ty.is_some());
+                match &value.kind {
+                    ExprKind::Literal(Literal::Int { value, suffix }) => {
+                        assert_eq!(value, "100");
+                        assert!(suffix.is_none());
+                    }
+                    _ => panic!("Expected int literal"),
+                }
+            }
+            _ => panic!("Expected const item"),
+        }
+    }
+
+    #[test]
+    fn test_parse_use_simple() {
+        let item = parse_single_item("use \"std/io\"").unwrap();
+        match &item.kind {
+            ItemKind::Use(use_decl) => {
+                assert_eq!(use_decl.path, "\"std/io\"");
+                assert!(use_decl.alias.is_none());
+                assert!(matches!(use_decl.items, UseItems::None));
+            }
+            _ => panic!("Expected use item"),
+        }
+    }
+
+    #[test]
+    fn test_parse_use_single() {
+        let item = parse_single_item("use \"std/io\".puts").unwrap();
+        match &item.kind {
+            ItemKind::Use(use_decl) => {
+                assert_eq!(use_decl.path, "\"std/io\"");
+                assert!(use_decl.alias.is_none());
+                match &use_decl.items {
+                    UseItems::Single(name) => assert_eq!(name, "puts"),
+                    _ => panic!("Expected Single"),
+                }
+            }
+            _ => panic!("Expected use item"),
+        }
+    }
+
+    #[test]
+    fn test_parse_use_all() {
+        let item = parse_single_item("use \"std/io\".*").unwrap();
+        match &item.kind {
+            ItemKind::Use(use_decl) => {
+                assert_eq!(use_decl.path, "\"std/io\"");
+                assert!(use_decl.alias.is_none());
+                assert!(matches!(use_decl.items, UseItems::All));
+            }
+            _ => panic!("Expected use item"),
+        }
+    }
+
+    #[test]
+    fn test_parse_use_multiple() {
+        let item = parse_single_item("use \"std/io\".{puts, gets}").unwrap();
+        match &item.kind {
+            ItemKind::Use(use_decl) => {
+                assert_eq!(use_decl.path, "\"std/io\"");
+                assert!(use_decl.alias.is_none());
+                match &use_decl.items {
+                    UseItems::Multiple(names) => {
+                        assert_eq!(names.len(), 2);
+                        assert_eq!(names[0], "puts");
+                        assert_eq!(names[1], "gets");
+                    }
+                    _ => panic!("Expected Multiple"),
+                }
+            }
+            _ => panic!("Expected use item"),
+        }
+    }
+
+    #[test]
+    fn test_parse_use_alias() {
+        let item = parse_single_item("use \"std/io\" as io").unwrap();
+        match &item.kind {
+            ItemKind::Use(use_decl) => {
+                assert_eq!(use_decl.path, "\"std/io\"");
+                assert_eq!(use_decl.alias, Some("io".to_string()));
+                assert!(matches!(use_decl.items, UseItems::None));
+            }
+            _ => panic!("Expected use item"),
+        }
     }
 
     #[test]
