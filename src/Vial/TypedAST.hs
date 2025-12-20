@@ -11,14 +11,31 @@ data InferredType where
   InferredType :: {inferredKind :: InferredTypeKind} -> InferredType
   deriving (Show, Eq)
 
+-- | Kinds in System F-omega: * represents proper types, and k1 -> k2 represents type constructors
+data Kind where
+  -- | The kind of proper types (e.g., Int, Bool)
+  Star :: Kind
+  -- | The kind of type constructors (e.g., List -> *, Functor -> (* -> *) -> *)
+  KArrow :: Kind -> Kind -> Kind
+  deriving (Show, Eq)
+
 data InferredTypeKind where
+  -- | Type variable (e.g., 'a in forall a. a -> a)
   ITyVar :: Ident -> InferredTypeKind
+  -- | Type constructor (e.g., List, Maybe)
   ITyCon :: Ident -> InferredTypeKind
+  -- | Type application (e.g., List Int, Maybe String)
   ITyApp :: InferredType -> InferredType -> InferredTypeKind
+  -- | Function type (e.g., Int -> Bool)
   ITyFunc :: [InferredType] -> InferredType -> InferredTypeKind
-  ITyForall :: [Ident] -> InferredType -> InferredTypeKind
+  -- | Universal quantification with kind annotations (e.g., forall a:*. a -> a)
+  ITyForall :: [(Ident, Kind)] -> InferredType -> InferredTypeKind
+  -- | Option type (e.g., Option Int)
   ITyOption :: InferredType -> InferredTypeKind
+  -- | Record type (e.g., {name: String, age: Int})
   ITyRecord :: [(Ident, InferredType)] -> InferredTypeKind
+  -- | Type-level lambda abstraction for type operators (e.g., \a -> List a)
+  ITyLam :: Ident -> InferredType -> InferredTypeKind
   deriving (Show, Eq)
 
 data TypedParam where
@@ -190,6 +207,7 @@ data TypedProgram where
 class TypedVisitor r where
   visitInferredType :: InferredType -> r
   visitInferredTypeKind :: InferredTypeKind -> r
+  visitKind :: Kind -> r
   visitTypedParam :: TypedParam -> r
   visitTypedField :: TypedField -> r
   visitTypedVariant :: TypedVariant -> r
@@ -219,9 +237,14 @@ instance TypedVisitor (TypedIdentity InferredTypeKind) where
   visitInferredTypeKind (ITyCon i) = TypedIdentity (ITyCon i)
   visitInferredTypeKind (ITyApp t1 t2) = TypedIdentity (ITyApp (runTypedIdentity (visitInferredType t1)) (runTypedIdentity (visitInferredType t2)))
   visitInferredTypeKind (ITyFunc ts t) = TypedIdentity (ITyFunc (map (runTypedIdentity . visitInferredType) ts) (runTypedIdentity (visitInferredType t)))
-  visitInferredTypeKind (ITyForall is t) = TypedIdentity (ITyForall is (runTypedIdentity (visitInferredType t)))
+  visitInferredTypeKind (ITyForall vars t) = TypedIdentity (ITyForall (map (\(i, k) -> (i, runTypedIdentity (visitKind k))) vars) (runTypedIdentity (visitInferredType t)))
   visitInferredTypeKind (ITyOption t) = TypedIdentity (ITyOption (runTypedIdentity (visitInferredType t)))
   visitInferredTypeKind (ITyRecord fields) = TypedIdentity (ITyRecord (map (\(i, t) -> (i, runTypedIdentity (visitInferredType t))) fields))
+  visitInferredTypeKind (ITyLam i t) = TypedIdentity (ITyLam i (runTypedIdentity (visitInferredType t)))
+
+instance TypedVisitor (TypedIdentity Kind) where
+  visitKind Star = TypedIdentity Star
+  visitKind (KArrow k1 k2) = TypedIdentity (KArrow (runTypedIdentity (visitKind k1)) (runTypedIdentity (visitKind k2)))
 
 instance TypedVisitor (TypedIdentity TypedParam) where
   visitTypedParam (TypedParam meta name typ mut) = TypedIdentity (TypedParam meta name (runTypedIdentity (visitInferredType typ)) mut)
@@ -373,9 +396,10 @@ untypeType (InferredType kind) = AST.Type dummyMeta (untypeTypeKind kind)
     untypeTypeKind (ITyCon i) = AST.TyCon i []
     untypeTypeKind (ITyApp t1 t2) = AST.TyApp (untypeType t1) (untypeType t2)
     untypeTypeKind (ITyFunc ts t) = AST.TyFunc (map untypeType ts) (untypeType t)
-    untypeTypeKind (ITyForall _ t) = AST.typeKind (untypeType t)  -- ignore forall
+    untypeTypeKind (ITyForall _ t) = AST.typeKind (untypeType t)  -- ignore forall and kinds for untyping
     untypeTypeKind (ITyOption t) = AST.TyOption (untypeType t)
     untypeTypeKind (ITyRecord fields) = AST.TyRecord (map (\(i, t) -> (i, untypeType t)) fields) Nothing
+    untypeTypeKind (ITyLam _ t) = AST.typeKind (untypeType t)  -- ignore type lambda for untyping
 
 untypeTypedParam :: TypedParam -> AST.Param
 untypeTypedParam (TypedParam meta name typ mut) = AST.Param meta name (untypeType typ) mut
