@@ -11,7 +11,7 @@ main = do
   let meta = AST.Metadata astSpan "example.vl" []
 
   -- Create a simple type: Int
-  let intType = AST.Type meta (AST.TyCon "Int" [])
+  let intType = TyAST.InferredType (TyAST.ITyCon "Int")
 
   -- Create a typed integer expression: 42
   let typedIntExpr = TyAST.TypedExpr meta intType (TyAST.TELit (AST.LInt 42))
@@ -20,7 +20,7 @@ main = do
   putStrLn $ "Type information: " ++ show (TyAST.typeOf typedIntExpr)
 
   -- Create another type: String
-  let stringType = AST.Type meta (AST.TyCon "String" [])
+  let stringType = TyAST.InferredType (TyAST.ITyCon "String")
 
   let typedStrExpr = TyAST.TypedExpr meta stringType (TyAST.TELit (AST.LString "Hello"))
 

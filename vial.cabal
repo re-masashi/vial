@@ -70,7 +70,12 @@ library
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
-    build-depends:    base >=4.18.3.0
+    build-depends:    
+      base >=4.18.3.0,
+      mtl >=2.3 && <2.4, 
+      containers >=0.6 && <0.7, 
+      prettyprinter >=1.7 && <1.8, 
+      bound >=2.0 && <3.0 
 
     -- Directories containing source files.
     hs-source-dirs:   src
