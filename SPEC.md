@@ -257,8 +257,8 @@ end
 x  _                            # binding, wildcard
 Option::Some(x)                 # enum
 Point { x, y }                  # struct
-[a, b, ..rest]                  # array
-P1 or P2                        # or-pattern
+[ a, b, ..rest ]                  # array
+P1 | P2                         # or-pattern
 P if cond                       # guard
 ```
 

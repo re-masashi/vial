@@ -155,7 +155,322 @@ pub fn parse_item(
     .with_attributes(attributes))
 }
 
+// Precedence levels (higher number = higher precedence)
+const PREC_ASSIGN: u8 = 1;
+const PREC_PIPE: u8 = 2;
+const PREC_OR: u8 = 3;
+const PREC_AND: u8 = 4;
+const PREC_COMPARE: u8 = 5;
+const PREC_BITOR: u8 = 6;
+const PREC_BITXOR: u8 = 7;
+const PREC_BITAND: u8 = 8;
+const PREC_SHIFT: u8 = 9;
+const PREC_ADD: u8 = 10;
+const PREC_MUL: u8 = 11;
+const PREC_UNARY: u8 = 12;
+const PREC_RANGE: u8 = 6;
+const PREC_CALL: u8 = 13; // function calls, field access
+const PREC_PRIMARY: u8 = 14;
+
 pub fn parse_expression(iter: &mut TokenIter, file: &String) -> Result<Expr, ParseError> {
+    let mut attributes = Vec::new();
+
+    while let Some((Token::At, _)) = iter.peek() {
+        attributes.push(parse_attribute(iter, file)?);
+    }
+
+    let mut expr = parse_expr_bp(iter, file, 0)?;
+    expr.attributes = attributes;
+    Ok(expr)
+}
+
+fn parse_expr_bp(iter: &mut TokenIter, file: &String, min_prec: u8) -> Result<Expr, ParseError> {
+    let mut left = parse_primary(iter, file)?;
+
+    // Postfix operators
+    loop {
+        match iter.peek() {
+            Some((Token::LParen, _)) => {
+                iter.next(); // consume '('
+                let mut args = Vec::new();
+                if !matches!(iter.peek(), Some((Token::RParen, _))) {
+                    loop {
+                        args.push(parse_expression(iter, file)?);
+                        match iter.peek() {
+                            Some((Token::Comma, _)) => { iter.next(); }
+                            Some((Token::RParen, _)) => break,
+                            _ => return Err(ParseError {
+                                kind: ParseErrorKind::UnexpectedToken(
+                                    iter.peek().map(|(t, _)| t.clone()).unwrap_or(Token::Ident("".to_string())),
+                                    vec![Token::Comma, Token::RParen],
+                                ),
+                                span: iter.peek().map(|(_, s)| s.clone()).unwrap_or(0..0),
+                                valid_syntax: vec!["',' or ')' in function call".to_string()],
+                            }),
+                        }
+                    }
+                }
+                expect_token(iter, Token::RParen)?;
+                let end_span = args.last().map(|a| &a.span).unwrap_or(&left.span);
+                left = Expr::new(
+                    Span::merge(&left.span, end_span),
+                    ExprKind::Call {
+                        func: Box::new(left),
+                        args,
+                    },
+                );
+            }
+            Some((Token::LBracket, _)) => {
+                iter.next(); // consume '['
+                let index = parse_expression(iter, file)?;
+                expect_token(iter, Token::RBracket)?;
+                left = Expr::new(
+                    Span::merge(&left.span, &index.span),
+                    ExprKind::Index {
+                        base: Box::new(left),
+                        index: Box::new(index),
+                    },
+                );
+            }
+            Some((Token::Dot, _)) => {
+                iter.next(); // consume '.'
+                let (token, span) = iter.next().ok_or(ParseError {
+                    kind: ParseErrorKind::UnexpectedEOF,
+                    span: 0..0,
+                    valid_syntax: vec!["field name".to_string()],
+                })?;
+                let field = match token {
+                    Token::Ident(name) => name,
+                    _ => return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken(
+                            token,
+                            vec![Token::Ident("".to_string())],
+                        ),
+                        span,
+                        valid_syntax: vec!["field name".to_string()],
+                    }),
+                };
+                left = Expr::new(
+                    Span::merge(&left.span, &Span::new(file.clone(), span)),
+                    ExprKind::Field {
+                        base: Box::new(left),
+                        field,
+                    },
+                );
+            }
+            Some((Token::LBrace, _)) => {
+                iter.next(); // consume '{'
+                let path = match &left.kind {
+                    ExprKind::Ident(name) => Path {
+                        span: left.span.clone(),
+                        segments: vec![PathSegment {
+                            span: left.span.clone(),
+                            ident: name.clone(),
+                            generics: None,
+                        }],
+                    },
+                    ExprKind::Path(p) => p.clone(),
+                    _ => return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken(
+                            Token::LBrace,
+                            vec![Token::Ident("".to_string())],
+                        ),
+                        span: left.span.range,
+                        valid_syntax: vec!["identifier for struct construction".to_string()],
+                    }),
+                };
+                let mut fields = Vec::new();
+                if let Some((Token::RBrace, _)) = iter.peek() {
+                    iter.next();
+                } else {
+                    loop {
+                        let field_name = match iter.next() {
+                            Some((Token::Ident(name), _)) => name,
+                            Some((Token::DotDot, span)) => {
+                                let spread_expr = parse_expression(iter, file)?;
+                                fields.push(StructField {
+                                    span: Span::new(file.clone(), span.start..spread_expr.span.range.end),
+                                    name: None,
+                                    value: spread_expr,
+                                });
+                                if let Some((Token::Comma, _)) = iter.peek() {
+                                    iter.next();
+                                } else {
+                                    break;
+                                }
+                                continue;
+                            }
+                            _ => return Err(ParseError {
+                                kind: ParseErrorKind::UnexpectedEOF,
+                                span: 0..0,
+                                valid_syntax: vec!["field name or '}'".to_string()],
+                            }),
+                        };
+                        if let Some((Token::Colon, _)) = iter.peek() {
+                            iter.next();
+                            let value = parse_expression(iter, file)?;
+                            fields.push(StructField {
+                                span: Span::new(file.clone(), 0..value.span.range.end),
+                                name: Some(field_name),
+                                value,
+                            });
+                        } else {
+                            fields.push(StructField {
+                                span: Span::new(file.clone(), 0..0),
+                                name: Some(field_name.clone()),
+                                value: Expr::new(Span::dummy(), ExprKind::Ident(field_name)),
+                            });
+                        }
+                        if let Some((Token::Comma, _)) = iter.peek() {
+                            iter.next();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                expect_token(iter, Token::RBrace)?;
+                left = Expr::new(
+                    Span::merge(&left.span, &left.span),
+                    ExprKind::Struct {
+                        path,
+                        fields,
+                        spread: None,
+                    },
+                );
+            }
+            _ => break,
+        }
+    }
+
+    loop {
+        let op_prec = match iter.peek() {
+            Some((Token::Eq, _)) => PREC_ASSIGN,
+            Some((Token::PlusEq, _)) => PREC_ASSIGN,
+            Some((Token::MinusEq, _)) => PREC_ASSIGN,
+            Some((Token::StarEq, _)) => PREC_ASSIGN,
+            Some((Token::SlashEq, _)) => PREC_ASSIGN,
+            Some((Token::Pipe, _)) => PREC_PIPE,
+            Some((Token::Or, _)) => PREC_OR,
+            Some((Token::And, _)) => PREC_AND,
+            Some((Token::EqEq, _)) => PREC_COMPARE,
+            Some((Token::NotEq, _)) => PREC_COMPARE,
+            Some((Token::Lt, _)) => PREC_COMPARE,
+            Some((Token::Gt, _)) => PREC_COMPARE,
+            Some((Token::LtEq, _)) => PREC_COMPARE,
+            Some((Token::GtEq, _)) => PREC_COMPARE,
+            Some((Token::BitOr, _)) => PREC_BITOR,
+            Some((Token::Caret, _)) => PREC_BITXOR,
+            Some((Token::Amp, _)) => PREC_BITAND,
+            Some((Token::Shl, _)) => PREC_SHIFT,
+            Some((Token::Shr, _)) => PREC_SHIFT,
+            Some((Token::Plus, _)) => PREC_ADD,
+            Some((Token::Minus, _)) => PREC_ADD,
+            Some((Token::Star, _)) => PREC_MUL,
+            Some((Token::Slash, _)) => PREC_MUL,
+            Some((Token::Percent, _)) => PREC_MUL,
+            Some((Token::DotDot, _)) => 6, // range operators
+            Some((Token::DotDotEq, _)) => 6,
+            _ => break,
+        };
+
+        if op_prec < min_prec {
+            break;
+        }
+
+        let (token, _) = iter.next().unwrap();
+
+        if token == Token::Pipe {
+            return parse_pipe(iter, file, left);
+        }
+
+        if matches!(token, Token::DotDot | Token::DotDotEq) {
+            // Handle range
+            let inclusive = matches!(token, Token::DotDotEq);
+            let end = if let Some((Token::RBracket, _)) | Some((Token::RBrace, _)) | Some((Token::Comma, _)) | Some((Token::RParen, _)) | Some((Token::End, _)) | Some((Token::Else, _)) | Some((Token::FatArrow, _)) | Some((Token::Colon, _)) | Some((Token::Semicolon, _)) | None = iter.peek() {
+                None
+            } else {
+                Some(Box::new(parse_expr_bp(iter, file, PREC_COMPARE)?))
+            };
+            return Ok(Expr::new(
+                Span::merge(&left.span, &end.as_ref().map(|e| &e.span).unwrap_or(&left.span)),
+                ExprKind::Range {
+                    start: Some(Box::new(left)),
+                    end,
+                    inclusive,
+                },
+            ));
+        }
+
+        let op = match token {
+            Token::Eq => None,
+            Token::PlusEq => Some(BinOp::Add),
+            Token::MinusEq => Some(BinOp::Sub),
+            Token::StarEq => Some(BinOp::Mul),
+            Token::SlashEq => Some(BinOp::Div),
+            Token::Or => Some(BinOp::Or),
+            Token::And => Some(BinOp::And),
+            Token::EqEq => Some(BinOp::Eq),
+            Token::NotEq => Some(BinOp::Ne),
+            Token::Lt => Some(BinOp::Lt),
+            Token::Gt => Some(BinOp::Gt),
+            Token::LtEq => Some(BinOp::Le),
+            Token::GtEq => Some(BinOp::Ge),
+            Token::BitOr => Some(BinOp::BitOr),
+            Token::Caret => Some(BinOp::BitXor),
+            Token::Amp => Some(BinOp::BitAnd),
+            Token::Shl => Some(BinOp::Shl),
+            Token::Shr => Some(BinOp::Shr),
+            Token::Plus => Some(BinOp::Add),
+            Token::Minus => Some(BinOp::Sub),
+            Token::Star => Some(BinOp::Mul),
+            Token::Slash => Some(BinOp::Div),
+            Token::Percent => Some(BinOp::Rem),
+            _ => unreachable!(),
+        };
+
+        if let Some(bin_op) = op {
+            let right = parse_expr_bp(iter, file, op_prec + 1)?;
+            left = Expr::new(
+                Span::merge(&left.span, &right.span),
+                ExprKind::Binary {
+                    left: Box::new(left),
+                    op: bin_op,
+                    right: Box::new(right),
+                },
+            );
+        } else {
+            // Assignment
+            let right = parse_expr_bp(iter, file, op_prec)?;
+            left = Expr::new(
+                Span::merge(&left.span, &right.span),
+                ExprKind::Assign {
+                    target: Box::new(left),
+                    op,
+                    value: Box::new(right),
+                },
+            );
+        }
+    }
+
+    // Check for postfix operators
+    left = parse_postfix(iter, file, left)?;
+
+    Ok(left)
+}
+
+fn parse_pipe(iter: &mut TokenIter, file: &String, left: Expr) -> Result<Expr, ParseError> {
+    let right = parse_expr_bp(iter, file, PREC_PIPE + 1)?;
+    let expr = Expr::new(
+        Span::merge(&left.span, &right.span),
+        ExprKind::Pipe {
+            left: Box::new(left),
+            right: Box::new(right),
+        },
+    );
+    Ok(expr)
+}
+
+fn parse_primary(iter: &mut TokenIter, file: &String) -> Result<Expr, ParseError> {
     let start_span = iter.peek().map(|(_, s)| s.start).unwrap_or(0);
 
     let (token, span) = iter.next().ok_or(ParseError {
@@ -209,7 +524,65 @@ pub fn parse_expression(iter: &mut TokenIter, file: &String) -> Result<Expr, Par
         Token::Char(s) => ExprKind::Literal(Literal::Char(s)),
         Token::True => ExprKind::Literal(Literal::Bool(true)),
         Token::False => ExprKind::Literal(Literal::Bool(false)),
-        Token::Ident(s) => ExprKind::Ident(s),
+        Token::Ident(s) => {
+            // Check if it's a path
+            let mut segments = vec![PathSegment {
+                span: Span::new(file.clone(), span.start..span.end),
+                ident: s,
+                generics: None,
+            }];
+
+            while let Some((Token::ColonColon, _)) = iter.peek() {
+                iter.next(); // consume ::
+
+                let (next_ident, next_span) = match iter.next() {
+                    Some((Token::Ident(n), s)) => (n, s),
+                    _ => return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken(
+                            iter.peek().unwrap_or(&(Token::Ident("".to_string()), 0..0)).0.clone(),
+                            vec![Token::Ident("".to_string())],
+                        ),
+                        span: iter.peek().unwrap_or(&(Token::Ident("".to_string()), 0..0)).1.clone(),
+                        valid_syntax: vec!["identifier".to_string()],
+                    }),
+                };
+
+                segments.push(PathSegment {
+                    span: Span::new(file.clone(), next_span.start..next_span.end),
+                    ident: next_ident,
+                    generics: None,
+                });
+            }
+
+            let path = Path {
+                span: Span::new(file.clone(), start_span..segments.last().unwrap().span.range.end),
+                segments,
+            };
+
+            // Check if it's an enum variant construction
+            if path.segments.len() > 1 && let Some((Token::LParen, _)) = iter.peek() {
+                iter.next(); // consume '('
+                let mut args = Vec::new();
+                if let Some((Token::RParen, _)) = iter.peek() {
+                    iter.next(); // consume ')'
+                } else {
+                    loop {
+                        args.push(parse_expression(iter, file)?);
+                        if let Some((Token::Comma, _)) = iter.peek() {
+                            iter.next(); // consume ','
+                        } else {
+                            break;
+                        }
+                    }
+                    expect_token(iter, Token::RParen)?;
+                }
+                ExprKind::EnumVariant { path, args }
+            } else if path.segments.len() == 1 {
+                ExprKind::Ident(path.segments[0].ident.clone())
+            } else {
+                ExprKind::Path(path)
+            }
+        }
         Token::LParen => {
             // Tuple or unit
             if let Some((Token::RParen, _)) = iter.peek() {
@@ -252,9 +625,128 @@ pub fn parse_expression(iter: &mut TokenIter, file: &String) -> Result<Expr, Par
             }
             ExprKind::Array { elements }
         }
+        Token::LBrace => {
+            // Map or struct
+            parse_struct_or_map(iter, file)?
+        }
+        Token::Do => {
+            // Block
+            let mut exprs = Vec::new();
+            loop {
+                if let Some((Token::End, _)) = iter.peek() {
+                    iter.next(); // consume 'end'
+                    break;
+                }
+                exprs.push(parse_expression(iter, file)?);
+            }
+            ExprKind::Block { exprs }
+        }
+        Token::If => {
+            // If expression
+            let condition = parse_expression(iter, file)?;
+            let then_branch = parse_expression(iter, file)?;
+            let else_branch = if let Some((Token::Else, _)) = iter.peek() {
+                iter.next(); // consume 'else'
+                Some(Box::new(parse_expression(iter, file)?))
+            } else {
+                None
+            };
+            ExprKind::If {
+                condition: Box::new(condition),
+                then_branch: Box::new(then_branch),
+                else_branch,
+            }
+        }
+        Token::Match => {
+            // Match expression
+            let scrutinee = parse_expression(iter, file)?;
+            let mut arms = Vec::new();
+            loop {
+                if let Some((Token::End, _)) = iter.peek() {
+                    iter.next(); // consume 'end'
+                    break;
+                }
+                let pattern = parse_pattern(iter, file)?;
+                expect_token(iter, Token::FatArrow)?;
+                let guard = if let Some((Token::If, _)) = iter.peek() {
+                    iter.next(); // consume 'if'
+                    Some(Box::new(parse_expression(iter, file)?))
+                } else {
+                    None
+                };
+                let body = parse_expression(iter, file)?;
+                arms.push(MatchArm {
+                    span: Span::new(file.clone(), pattern.span.range.start..body.span.range.end),
+                    attributes: Vec::new(),
+                    pattern,
+                    guard,
+                    body: Box::new(body),
+                });
+            }
+            ExprKind::Match {
+                scrutinee: Box::new(scrutinee),
+                arms,
+            }
+        }
+        Token::For => {
+            // For loop
+            let pattern = parse_pattern(iter, file)?;
+            expect_token(iter, Token::In)?;
+            let iterator = parse_expression(iter, file)?;
+            let body = parse_expression(iter, file)?;
+            ExprKind::For {
+                pattern,
+                iterator: Box::new(iterator),
+                body: Box::new(body),
+            }
+        }
+        Token::While => {
+            // While loop
+            let condition = parse_expression(iter, file)?;
+            let body = parse_expression(iter, file)?;
+            ExprKind::While {
+                condition: Box::new(condition),
+                body: Box::new(body),
+            }
+        }
+        Token::Break => {
+            let value = if is_expr_start(iter.peek()) {
+                Some(Box::new(parse_expression(iter, file)?))
+            } else {
+                None
+            };
+            ExprKind::Break { value }
+        }
+        Token::Continue => ExprKind::Continue,
+        Token::Return => {
+            let value = if is_expr_start(iter.peek()) {
+                Some(Box::new(parse_expression(iter, file)?))
+            } else {
+                None
+            };
+            ExprKind::Return { value }
+        }
+        Token::Defer => {
+            let expr = parse_expression(iter, file)?;
+            ExprKind::Defer {
+                expr: Box::new(expr),
+            }
+        }
+        Token::Spawn => {
+            let expr = parse_expression(iter, file)?;
+            ExprKind::Spawn {
+                expr: Box::new(expr),
+            }
+        }
+        Token::Comptime => {
+            let expr = parse_expression(iter, file)?;
+            ExprKind::Comptime {
+                expr: Box::new(expr),
+            }
+        }
         Token::Minus => {
             // Unary minus
-            let expr = parse_expression(iter, file)?;
+            let expr = parse_expr_bp(iter, file, PREC_UNARY)?;
             ExprKind::Unary {
                 op: UnOp::Neg,
                 expr: Box::new(expr),
@@ -262,7 +754,7 @@ pub fn parse_expression(iter: &mut TokenIter, file: &String) -> Result<Expr, Par
         }
         Token::Not => {
             // Logical not
-            let expr = parse_expression(iter, file)?;
+            let expr = parse_expr_bp(iter, file, PREC_UNARY)?;
             ExprKind::Unary {
                 op: UnOp::Not,
                 expr: Box::new(expr),
@@ -276,7 +768,7 @@ pub fn parse_expression(iter: &mut TokenIter, file: &String) -> Result<Expr, Par
             } else {
                 false
             };
-            let expr = parse_expression(iter, file)?;
+            let expr = parse_expr_bp(iter, file, PREC_UNARY)?;
             ExprKind::Unary {
                 op: if mutable { UnOp::RefMut } else { UnOp::Ref },
                 expr: Box::new(expr),
@@ -284,10 +776,36 @@ pub fn parse_expression(iter: &mut TokenIter, file: &String) -> Result<Expr, Par
         }
         Token::AmpMut => {
             // Mutable reference
-            let expr = parse_expression(iter, file)?;
+            let expr = parse_expr_bp(iter, file, PREC_UNARY)?;
             ExprKind::Unary {
                 op: UnOp::RefMut,
                 expr: Box::new(expr),
+            }
+        }
+        Token::Tilde => {
+            // Bitwise not
+            let expr = parse_expr_bp(iter, file, PREC_UNARY)?;
+            ExprKind::Unary {
+                op: UnOp::BitNot,
+                expr: Box::new(expr),
+            }
+        }
+        Token::DotDot => {
+            let inclusive = false;
+            let end = parse_expr_bp(iter, file, PREC_RANGE - 1)?;
+            ExprKind::Range {
+                start: None,
+                end: Some(Box::new(end)),
+                inclusive,
+            }
+        }
+        Token::DotDotEq => {
+            let inclusive = true;
+            let end = parse_expr_bp(iter, file, PREC_RANGE - 1)?;
+            ExprKind::Range {
+                start: None,
+                end: Some(Box::new(end)),
+                inclusive,
             }
         }
         _ => {
@@ -304,22 +822,137 @@ pub fn parse_expression(iter: &mut TokenIter, file: &String) -> Result<Expr, Par
                         Token::Ident("".to_string()),
                         Token::LParen,
                         Token::LBracket,
+                        Token::LBrace,
+                        Token::Do,
+                        Token::If,
+                        Token::Match,
+                        Token::For,
+                        Token::While,
+                        Token::Break,
+                        Token::Continue,
+                        Token::Return,
+                        Token::Defer,
+                        Token::Spawn,
+                        Token::Comptime,
                         Token::Minus,
                         Token::Not,
                         Token::Amp,
                         Token::AmpMut,
+                        Token::Tilde,
                     ],
                 ),
                 span,
-                valid_syntax: vec!["literal or identifier".to_string()],
+                valid_syntax: vec!["primary expression".to_string()],
             });
         }
     };
 
     Ok(Expr::new(
-        Span::new(file.clone(), start_span..iter.peek().map(|(_, s)| s.end).unwrap_or(start_span)),
+        Span::new(file.clone(), start_span..iter.peek().map(|(_, s)| s.end).unwrap_or(start_span + 1)),
         kind,
     ))
+}
+
+fn parse_struct_or_map(iter: &mut TokenIter, file: &String) -> Result<ExprKind, ParseError> {
+    // Note: the LBrace has already been consumed by parse_primary
+    
+    // Check for empty map/block
+    if let Some((Token::RBrace, _)) = iter.peek() {
+        iter.next(); // consume }
+        return Ok(ExprKind::Map { entries: Vec::new() });
+    }
+    
+    let mut entries = Vec::new();
+    let key = parse_expression(iter, file)?;
+    expect_token(iter, Token::FatArrow)?;
+    let value = parse_expression(iter, file)?;
+    entries.push((key, value));
+    while let Some((Token::Comma, _)) = iter.peek() {
+        iter.next();
+        // Check if there's another entry or just closing brace
+        if let Some((Token::RBrace, _)) = iter.peek() {
+            break;
+        }
+        let key = parse_expression(iter, file)?;
+        expect_token(iter, Token::FatArrow)?;
+        let value = parse_expression(iter, file)?;
+        entries.push((key, value));
+    }
+    expect_token(iter, Token::RBrace)?;
+    Ok(ExprKind::Map { entries })
+}
+
+fn parse_postfix(iter: &mut TokenIter, file: &String, mut expr: Expr) -> Result<Expr, ParseError> {
+    loop {
+        match iter.peek() {
+            Some((Token::LParen, _)) => {
+                // Function call
+                iter.next(); // consume '('
+                let mut args = Vec::new();
+                if let Some((Token::RParen, _)) = iter.peek() {
+                    iter.next(); // consume ')'
+                } else {
+                    loop {
+                        args.push(parse_expression(iter, file)?);
+                        if let Some((Token::Comma, _)) = iter.peek() {
+                            iter.next(); // consume ','
+                        } else {
+                            break;
+                        }
+                    }
+                    expect_token(iter, Token::RParen)?;
+                }
+                expr = Expr::new(
+                    Span::merge(&expr.span, &args.last().map(|e| &e.span).unwrap_or(&expr.span)),
+                    ExprKind::Call {
+                        func: Box::new(expr),
+                        args,
+                    },
+                );
+            }
+            Some((Token::Dot, _)) => {
+                // Field access
+                iter.next(); // consume '.'
+                let field = match iter.next() {
+                    Some((Token::Ident(name), _)) => name,
+                    _ => return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken(
+                            iter.peek().unwrap_or(&(Token::Ident("".to_string()), 0..0)).0.clone(),
+                            vec![Token::Ident("".to_string())],
+                        ),
+                        span: iter.peek().unwrap_or(&(Token::Ident("".to_string()), 0..0)).1.clone(),
+                        valid_syntax: vec!["field name".to_string()],
+                    }),
+                };
+                expr = Expr::new(
+                    Span::merge(&expr.span, &Span::new(file.clone(), 0..0)), // TODO: proper span
+                    ExprKind::Field {
+                        base: Box::new(expr),
+                        field,
+                    },
+                );
+            }
+            Some((Token::LBracket, _)) => {
+                // Index
+                iter.next(); // consume '['
+                let index = parse_expression(iter, file)?;
+                expect_token(iter, Token::RBracket)?;
+                expr = Expr::new(
+                    Span::merge(&expr.span, &index.span),
+                    ExprKind::Index {
+                        base: Box::new(expr),
+                        index: Box::new(index),
+                    },
+                );
+            }
+            _ => break,
+        }
+    }
+    Ok(expr)
+}
+
+fn is_expr_start(peek: Option<&(Token, Range<usize>)>) -> bool {
+    matches!(peek, Some((Token::Int(_) | Token::Float(_) | Token::String(_) | Token::Char(_) | Token::True | Token::False | Token::Ident(_) | Token::LParen | Token::LBracket | Token::LBrace | Token::Do | Token::If | Token::Match | Token::For | Token::While | Token::Break | Token::Continue | Token::Return | Token::Defer | Token::Spawn | Token::Comptime | Token::Minus | Token::Not | Token::Amp | Token::AmpMut | Token::Tilde | Token::DotDot | Token::DotDotEq, _)))
 }
 
 pub fn parse_attribute(iter: &mut TokenIter, file: &String) -> Result<Attribute, ParseError> {
@@ -778,7 +1411,7 @@ pub fn parse_type(iter: &mut TokenIter, file: &String) -> Result<Type, ParseErro
 
 fn expect_token(iter: &mut TokenIter, expected: Token) -> Result<(), ParseError> {
     match iter.next() {
-        Some((t, span)) if t == expected => Ok(()),
+        Some((t, _span)) if t == expected => Ok(()),
         Some((t, span)) => Err(ParseError {
             kind: ParseErrorKind::UnexpectedToken(t, vec![expected.clone()]),
             span,
@@ -792,8 +1425,274 @@ fn expect_token(iter: &mut TokenIter, expected: Token) -> Result<(), ParseError>
     }
 }
 
-pub fn parse_pattern(_iter: &mut TokenIter, _file: &String) -> Result<Pattern, ParseError> {
-    todo!()
+fn parse_primary_pattern(iter: &mut TokenIter, file: &String) -> Result<Pattern, ParseError> {
+    let start_span = iter.peek().map(|(_, s)| s.start).unwrap_or(0);
+
+    let (token, span) = iter.next().ok_or(ParseError {
+        kind: ParseErrorKind::UnexpectedEOF,
+        span: 0..0,
+        valid_syntax: vec!["pattern".to_string()],
+    })?;
+
+    let kind = match token {
+        Token::Underscore => PatternKind::Wildcard,
+        Token::Int(s) => {
+            let (value, suffix) = if let Some(suffix_str) = parse_int_suffix(&s) {
+                let val_end = s.len() - suffix_str.len();
+                (s[..val_end].to_string(), Some(suffix_str))
+            } else {
+                (s.clone(), None)
+            };
+            let int_type = suffix.map(|s| match s.as_str() {
+                "i8" => IntType::I8,
+                "i16" => IntType::I16,
+                "i32" => IntType::I32,
+                "i64" => IntType::I64,
+                "int" => IntType::Int,
+                "u8" => IntType::U8,
+                "u16" => IntType::U16,
+                "u32" => IntType::U32,
+                "u64" => IntType::U64,
+                "uint" => IntType::Uint,
+                _ => IntType::Int,
+            });
+            PatternKind::Literal(Literal::Int { value, suffix: int_type })
+        }
+        Token::Float(s) => {
+            let (value, suffix) = if s.ends_with("f32") {
+                (s[..s.len() - 3].to_string(), Some(FloatType::F32))
+            } else if s.ends_with("f64") {
+                (s[..s.len() - 3].to_string(), Some(FloatType::F64))
+            } else {
+                (s.clone(), None)
+            };
+            PatternKind::Literal(Literal::Float { value, suffix })
+        }
+        Token::String(s) => PatternKind::Literal(Literal::String(s)),
+        Token::Char(s) => PatternKind::Literal(Literal::Char(s)),
+        Token::True => PatternKind::Literal(Literal::Bool(true)),
+        Token::False => PatternKind::Literal(Literal::Bool(false)),
+        Token::Ident(s) => {
+            // Check if it's a path
+            let mut segments = vec![PathSegment {
+                span: Span::new(file.clone(), span.start..span.end),
+                ident: s,
+                generics: None,
+            }];
+
+            while let Some((Token::ColonColon, _)) = iter.peek() {
+                iter.next(); // consume ::
+
+                let (next_ident, next_span) = match iter.next() {
+                    Some((Token::Ident(n), s)) => (n, s),
+                    _ => return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken(
+                            iter.peek().unwrap_or(&(Token::Ident("".to_string()), 0..0)).0.clone(),
+                            vec![Token::Ident("".to_string())],
+                        ),
+                        span: iter.peek().unwrap_or(&(Token::Ident("".to_string()), 0..0)).1.clone(),
+                        valid_syntax: vec!["identifier".to_string()],
+                    }),
+                };
+
+                segments.push(PathSegment {
+                    span: Span::new(file.clone(), next_span.start..next_span.end),
+                    ident: next_ident,
+                    generics: None,
+                });
+            }
+
+            if segments.len() == 1 {
+                // Binding or enum variant
+                if let Some((Token::LParen, _)) = iter.peek() {
+                    // Enum variant
+                    iter.next(); // consume '('
+                    let mut args = Vec::new();
+                    if let Some((Token::RParen, _)) = iter.peek() {
+                        iter.next(); // consume ')'
+                    } else {
+                        loop {
+                            args.push(parse_pattern(iter, file)?);
+                            if let Some((Token::Comma, _)) = iter.peek() {
+                                iter.next(); // consume ','
+                            } else {
+                                break;
+                            }
+                        }
+                        expect_token(iter, Token::RParen)?;
+                    }
+                    PatternKind::EnumVariant {
+                        path: Path {
+                            span: Span::new(file.clone(), start_span..span.end),
+                            segments,
+                        },
+                        args,
+                    }
+                } else if let Some((Token::LBrace, _)) = iter.peek() {
+                    // Struct pattern
+                    iter.next(); // consume '{'
+                    let mut fields = Vec::new();
+                    let mut rest = false;
+                    if let Some((Token::RBrace, _)) = iter.peek() {
+                        iter.next(); // consume '}'
+                    } else {
+                        loop {
+                            if let Some((Token::DotDot, _)) = iter.peek() {
+                                iter.next(); // consume '..'
+                                rest = true;
+                                break;
+                            }
+                            let field_name = match iter.next() {
+                                Some((Token::Ident(name), _)) => name,
+                                _ => return Err(ParseError {
+                                    kind: ParseErrorKind::UnexpectedEOF,
+                                    span: 0..0,
+                                    valid_syntax: vec!["field name".to_string()],
+                                }),
+                            };
+                            let pattern = if let Some((Token::Colon, _)) = iter.peek() {
+                                iter.next(); // consume ':'
+                                Some(parse_pattern(iter, file)?)
+                            } else {
+                                None
+                            };
+                            fields.push(FieldPattern {
+                                span: Span::new(file.clone(), 0..0), // TODO
+                                name: field_name,
+                                pattern,
+                            });
+                            if let Some((Token::Comma, _)) = iter.peek() {
+                                iter.next(); // consume ','
+                            } else {
+                                break;
+                            }
+                        }
+                        expect_token(iter, Token::RBrace)?;
+                    }
+                    PatternKind::Struct {
+                        path: Path {
+                            span: Span::new(file.clone(), start_span..span.end),
+                            segments,
+                        },
+                        fields,
+                        rest,
+                    }
+                } else {
+                    // Binding
+                    let mutable = if let Some((Token::Mut, _)) = iter.peek() {
+                        iter.next(); // consume 'mut'
+                        true
+                    } else {
+                        false
+                    };
+                    PatternKind::Ident {
+                        name: segments[0].ident.clone(),
+                        mutable,
+                    }
+                }
+            } else {
+                // Path pattern
+                PatternKind::Path(Path {
+                    span: Span::new(file.clone(), start_span..segments.last().unwrap().span.range.end),
+                    segments,
+                })
+            }
+        }
+        Token::LParen => {
+            // Tuple pattern
+            let mut elements = Vec::new();
+            if let Some((Token::RParen, _)) = iter.peek() {
+                iter.next(); // consume ')'
+            } else {
+                loop {
+                    elements.push(parse_pattern(iter, file)?);
+                    if let Some((Token::Comma, _)) = iter.peek() {
+                        iter.next(); // consume ','
+                    } else {
+                        break;
+                    }
+                }
+                expect_token(iter, Token::RParen)?;
+            }
+            PatternKind::Tuple { elements }
+        }
+        Token::LBracket => {
+            // Array pattern
+            let mut elements = Vec::new();
+            let mut rest = None;
+            if let Some((Token::RBracket, _)) = iter.peek() {
+                iter.next(); // consume ']'
+            } else {
+                loop {
+                    if let Some((Token::DotDot, _)) = iter.peek() {
+                        iter.next(); // consume '..'
+                        if is_pattern_start(iter.peek()) {
+                            rest = Some(Box::new(parse_pattern(iter, file)?));
+                        }
+                        break;
+                    }
+                    elements.push(parse_pattern(iter, file)?);
+                    if let Some((Token::Comma, _)) = iter.peek() {
+                        iter.next(); // consume ','
+                    } else {
+                        break;
+                    }
+                }
+                expect_token(iter, Token::RBracket)?;
+            }
+            PatternKind::Array { elements, rest }
+        }
+        _ => {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken(
+                    token,
+                    vec![
+                        Token::Underscore,
+                        Token::Int("".to_string()),
+                        Token::Float("".to_string()),
+                        Token::String("".to_string()),
+                        Token::Char("".to_string()),
+                        Token::True,
+                        Token::False,
+                        Token::Ident("".to_string()),
+                        Token::LParen,
+                        Token::LBracket,
+                    ],
+                ),
+                span,
+                valid_syntax: vec!["pattern".to_string()],
+            });
+        }
+    };
+
+    Ok(Pattern::new(
+        Span::new(file.clone(), start_span..iter.peek().map(|(_, s)| s.end).unwrap_or(start_span + 1)),
+        kind,
+    ))
+}
+
+pub fn parse_pattern(iter: &mut TokenIter, file: &String) -> Result<Pattern, ParseError> {
+    let mut patterns = vec![parse_primary_pattern(iter, file)?];
+
+    while let Some((Token::BitOr, _)) = iter.peek() {
+        iter.next(); // consume '|'
+        patterns.push(parse_primary_pattern(iter, file)?);
+    }
+
+    if patterns.len() == 1 {
+        Ok(patterns.into_iter().next().unwrap())
+    } else {
+        let start_span = patterns[0].span.range.start;
+        let end_span = patterns.last().unwrap().span.range.end;
+        Ok(Pattern::new(
+            Span::new(file.clone(), start_span..end_span),
+            PatternKind::Or { patterns },
+        ))
+    }
+}
+
+fn is_pattern_start(peek: Option<&(Token, Range<usize>)>) -> bool {
+    matches!(peek, Some((Token::Underscore | Token::Int(_) | Token::Float(_) | Token::String(_) | Token::Char(_) | Token::True | Token::False | Token::Ident(_) | Token::LParen | Token::LBracket, _)))
 }
 
 pub fn parse_struct(iter: &mut TokenIter, file: &String) -> Result<StructDecl, ParseError> {
@@ -854,7 +1753,7 @@ pub fn parse_struct(iter: &mut TokenIter, file: &String) -> Result<StructDecl, P
 
                 // Parse field name
                 let field_name = match iter.next() {
-                    Some((Token::Ident(n), span)) => n,
+                    Some((Token::Ident(n), _span)) => n,
                     Some((t, span)) => {
                         return Err(ParseError {
                             kind: ParseErrorKind::UnexpectedToken(
@@ -1803,7 +2702,7 @@ fn parse_generic_params(
     if let Some((Token::Lt, _)) = iter.peek() {
         iter.next(); // consume '<'
 
-        while let Some((t, span)) = iter.peek() {
+        while let Some((t, _span)) = iter.peek() {
             if *t == Token::Gt {
                 iter.next(); // consume '>'
                 break;
@@ -2742,6 +3641,14 @@ end
         parse_item(&mut iter, &"<test>".to_string(), Vec::new())
     }
 
+    fn parse_single_expression(source: &str) -> Result<Expr, ParseError> {
+        let tokens = lex_without_comments(source).unwrap();
+        let token_pairs: Vec<(Token, Range<usize>)> =
+            tokens.into_iter().map(|s| (s.token, s.span)).collect();
+        let mut iter = token_pairs.into_iter().peekable();
+        parse_expression(&mut iter, &"<test>".to_string())
+    }
+
     #[test]
     fn test_parse_const() {
         let item = parse_single_item("const PI = 3.14159").unwrap();
@@ -2874,6 +3781,1019 @@ end
         match alias.ty.kind {
             TypeKind::Fn { .. } => {}
             _ => panic!("Expected Fn type"),
+        }
+    }
+
+    // Expression parsing tests
+    #[test]
+    fn test_parse_literal_int() {
+        let expr = parse_single_expression("42").unwrap();
+        match &expr.kind {
+            ExprKind::Literal(Literal::Int { value, suffix }) => {
+                assert_eq!(value, "42");
+                assert!(suffix.is_none());
+            }
+            _ => panic!("Expected int literal"),
+        }
+    }
+
+    #[test]
+    fn test_parse_literal_int_with_suffix() {
+        let expr = parse_single_expression("42i32").unwrap();
+        match &expr.kind {
+            ExprKind::Literal(Literal::Int { value, suffix }) => {
+                assert_eq!(value, "42");
+                assert_eq!(suffix, &Some(IntType::I32));
+            }
+            _ => panic!("Expected int literal with suffix"),
+        }
+    }
+
+    #[test]
+    fn test_parse_literal_float() {
+        let expr = parse_single_expression("3.14").unwrap();
+        match &expr.kind {
+            ExprKind::Literal(Literal::Float { value, suffix }) => {
+                assert_eq!(value, "3.14");
+                assert!(suffix.is_none());
+            }
+            _ => panic!("Expected float literal"),
+        }
+    }
+
+    #[test]
+    fn test_parse_literal_float_with_suffix() {
+        let expr = parse_single_expression("3.14f64").unwrap();
+        match &expr.kind {
+            ExprKind::Literal(Literal::Float { value, suffix }) => {
+                assert_eq!(value, "3.14");
+                assert_eq!(suffix, &Some(FloatType::F64));
+            }
+            _ => panic!("Expected float literal with suffix"),
+        }
+    }
+
+    #[test]
+    fn test_parse_literal_string() {
+        let expr = parse_single_expression("\"hello\"").unwrap();
+        match &expr.kind {
+            ExprKind::Literal(Literal::String(s)) => assert_eq!(s, "\"hello\""),
+            _ => panic!("Expected string literal"),
+        }
+    }
+
+    #[test]
+    fn test_parse_literal_char() {
+        let expr = parse_single_expression("'a'").unwrap();
+        match &expr.kind {
+            ExprKind::Literal(Literal::Char(c)) => assert_eq!(c, "'a'"),
+            _ => panic!("Expected char literal"),
+        }
+    }
+
+    #[test]
+    fn test_parse_literal_bool_true() {
+        let expr = parse_single_expression("true").unwrap();
+        match &expr.kind {
+            ExprKind::Literal(Literal::Bool(b)) => assert!(*b),
+            _ => panic!("Expected bool literal true"),
+        }
+    }
+
+    #[test]
+    fn test_parse_literal_bool_false() {
+        let expr = parse_single_expression("false").unwrap();
+        match &expr.kind {
+            ExprKind::Literal(Literal::Bool(b)) => assert!(!*b),
+            _ => panic!("Expected bool literal false"),
+        }
+    }
+
+    #[test]
+    fn test_parse_literal_unit() {
+        let expr = parse_single_expression("()").unwrap();
+        match &expr.kind {
+            ExprKind::Literal(Literal::Unit) => {}
+            _ => panic!("Expected unit literal"),
+        }
+    }
+
+    #[test]
+    fn test_parse_identifier() {
+        let expr = parse_single_expression("variable").unwrap();
+        match &expr.kind {
+            ExprKind::Ident(name) => assert_eq!(name, "variable"),
+            _ => panic!("Expected identifier"),
+        }
+    }
+
+    #[test]
+    fn test_parse_binary_add() {
+        let expr = parse_single_expression("a + b").unwrap();
+        match &expr.kind {
+            ExprKind::Binary { left, op, right } => {
+                assert_eq!(op, &BinOp::Add);
+                match &left.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "a"),
+                    _ => panic!("Expected left ident"),
+                }
+                match &right.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "b"),
+                    _ => panic!("Expected right ident"),
+                }
+            }
+            _ => panic!("Expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_binary_subtract() {
+        let expr = parse_single_expression("x - y").unwrap();
+        match &expr.kind {
+            ExprKind::Binary { left, op, right } => {
+                assert_eq!(op, &BinOp::Sub);
+                match &left.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "x"),
+                    _ => panic!("Expected left ident"),
+                }
+                match &right.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "y"),
+                    _ => panic!("Expected right ident"),
+                }
+            }
+            _ => panic!("Expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_binary_multiply() {
+        let expr = parse_single_expression("2 * 3").unwrap();
+        match &expr.kind {
+            ExprKind::Binary { left, op, right } => {
+                assert_eq!(op, &BinOp::Mul);
+                match &left.kind {
+                    ExprKind::Literal(Literal::Int { value, .. }) => assert_eq!(value, "2"),
+                    _ => panic!("Expected left int literal"),
+                }
+                match &right.kind {
+                    ExprKind::Literal(Literal::Int { value, .. }) => assert_eq!(value, "3"),
+                    _ => panic!("Expected right int literal"),
+                }
+            }
+            _ => panic!("Expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_binary_divide() {
+        let expr = parse_single_expression("10 / 2").unwrap();
+        match &expr.kind {
+            ExprKind::Binary { left, op, right } => {
+                assert_eq!(op, &BinOp::Div);
+            }
+            _ => panic!("Expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_binary_equals() {
+        let expr = parse_single_expression("a == b").unwrap();
+        match &expr.kind {
+            ExprKind::Binary { op, .. } => {
+                assert_eq!(op, &BinOp::Eq);
+            }
+            _ => panic!("Expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_binary_not_equals() {
+        let expr = parse_single_expression("x != y").unwrap();
+        match &expr.kind {
+            ExprKind::Binary { op, .. } => {
+                assert_eq!(op, &BinOp::Ne);
+            }
+            _ => panic!("Expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_binary_less_than() {
+        let expr = parse_single_expression("a < b").unwrap();
+        match &expr.kind {
+            ExprKind::Binary { op, .. } => {
+                assert_eq!(op, &BinOp::Lt);
+            }
+            _ => panic!("Expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_binary_greater_than() {
+        let expr = parse_single_expression("x > y").unwrap();
+        match &expr.kind {
+            ExprKind::Binary { op, .. } => {
+                assert_eq!(op, &BinOp::Gt);
+            }
+            _ => panic!("Expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_binary_logical_and() {
+        let expr = parse_single_expression("a and b").unwrap();
+        match &expr.kind {
+            ExprKind::Binary { op, .. } => {
+                assert_eq!(op, &BinOp::And);
+            }
+            _ => panic!("Expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_binary_logical_or() {
+        let expr = parse_single_expression("x or y").unwrap();
+        match &expr.kind {
+            ExprKind::Binary { op, .. } => {
+                assert_eq!(op, &BinOp::Or);
+            }
+            _ => panic!("Expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_binary_assignment() {
+        let expr = parse_single_expression("a = 5").unwrap();
+        match &expr.kind {
+            ExprKind::Assign { target, op, value } => {
+                assert!(op.is_none());
+                match &target.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "a"),
+                    _ => panic!("Expected target ident"),
+                }
+                match &value.kind {
+                    ExprKind::Literal(Literal::Int { value, .. }) => assert_eq!(value, "5"),
+                    _ => panic!("Expected value int literal"),
+                }
+            }
+            _ => panic!("Expected assignment expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_binary_compound_assignment() {
+        let expr = parse_single_expression("x += 10").unwrap();
+        match &expr.kind {
+            ExprKind::Binary { left, op, right } => {
+                assert_eq!(op, &BinOp::Add);
+                match &left.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "x"),
+                    _ => panic!("Expected left ident"),
+                }
+                match &right.kind {
+                    ExprKind::Literal(Literal::Int { value, .. }) => assert_eq!(value, "10"),
+                    _ => panic!("Expected right 10"),
+                }
+            }
+            _ => panic!("Expected compound assignment expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_binary_precedence() {
+        let expr = parse_single_expression("a + b * c").unwrap();
+        match &expr.kind {
+            ExprKind::Binary { left, op, right } => {
+                assert_eq!(op, &BinOp::Add);
+                match &right.kind {
+                    ExprKind::Binary { op: inner_op, .. } => {
+                        assert_eq!(inner_op, &BinOp::Mul);
+                    }
+                    _ => panic!("Expected nested binary for multiplication"),
+                }
+            }
+            _ => panic!("Expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_pipe_operator() {
+        let expr = parse_single_expression("a |> b").unwrap();
+        match &expr.kind {
+            ExprKind::Pipe { left, right } => {
+                match &left.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "a"),
+                    _ => panic!("Expected left ident"),
+                }
+                match &right.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "b"),
+                    _ => panic!("Expected right ident"),
+                }
+            }
+            _ => panic!("Expected pipe expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_unary_negation() {
+        let expr = parse_single_expression("-x").unwrap();
+        match &expr.kind {
+            ExprKind::Unary { op, expr: inner } => {
+                assert_eq!(op, &UnOp::Neg);
+                match &inner.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "x"),
+                    _ => panic!("Expected inner ident"),
+                }
+            }
+            _ => panic!("Expected unary expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_unary_logical_not() {
+        let expr = parse_single_expression("not flag").unwrap();
+        match &expr.kind {
+            ExprKind::Unary { op, expr: inner } => {
+                assert_eq!(op, &UnOp::Not);
+                match &inner.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "flag"),
+                    _ => panic!("Expected inner ident"),
+                }
+            }
+            _ => panic!("Expected unary expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_unary_reference() {
+        let expr = parse_single_expression("&value").unwrap();
+        match &expr.kind {
+            ExprKind::Unary { op, expr: inner } => {
+                assert_eq!(op, &UnOp::Ref);
+                match &inner.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "value"),
+                    _ => panic!("Expected inner ident"),
+                }
+            }
+            _ => panic!("Expected unary expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_unary_mutable_reference() {
+        let expr = parse_single_expression("&mut data").unwrap();
+        match &expr.kind {
+            ExprKind::Unary { op, expr: inner } => {
+                assert_eq!(op, &UnOp::RefMut);
+            }
+            _ => panic!("Expected unary expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_unary_bitwise_not() {
+        let expr = parse_single_expression("~mask").unwrap();
+        match &expr.kind {
+            ExprKind::Unary { op, expr: inner } => {
+                assert_eq!(op, &UnOp::BitNot);
+                match &inner.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "mask"),
+                    _ => panic!("Expected inner ident"),
+                }
+            }
+            _ => panic!("Expected unary expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_function_call_no_args() {
+        let expr = parse_single_expression("func()").unwrap();
+        match &expr.kind {
+            ExprKind::Call { func, args } => {
+                assert!(args.is_empty());
+                match &func.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "func"),
+                    _ => panic!("Expected func ident"),
+                }
+            }
+            _ => panic!("Expected call expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_function_call_with_args() {
+        let expr = parse_single_expression("add(a, b)").unwrap();
+        match &expr.kind {
+            ExprKind::Call { func, args } => {
+                assert_eq!(args.len(), 2);
+                match &args[0].kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "a"),
+                    _ => panic!("Expected arg a"),
+                }
+                match &args[1].kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "b"),
+                    _ => panic!("Expected arg b"),
+                }
+            }
+            _ => panic!("Expected call expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_method_call() {
+        let expr = parse_single_expression("obj.method(arg)").unwrap();
+        match &expr.kind {
+            ExprKind::Call { func, args } => {
+                assert_eq!(args.len(), 1);
+                match &func.kind {
+                    ExprKind::Field { base, field } => {
+                        match &base.kind {
+                            ExprKind::Ident(name) => assert_eq!(name, "obj"),
+                            _ => panic!("Expected base obj"),
+                        }
+                        assert_eq!(field, "method");
+                    }
+                    _ => panic!("Expected field access for method"),
+                }
+            }
+            _ => panic!("Expected call expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_field_access() {
+        let expr = parse_single_expression("point.x").unwrap();
+        match &expr.kind {
+            ExprKind::Field { base, field } => {
+                assert_eq!(field, "x");
+                match &base.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "point"),
+                    _ => panic!("Expected base ident"),
+                }
+            }
+            _ => panic!("Expected field expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_indexing() {
+        let expr = parse_single_expression("arr[0]").unwrap();
+        match &expr.kind {
+            ExprKind::Index { base, index } => {
+                match &base.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "arr"),
+                    _ => panic!("Expected base ident"),
+                }
+                match &index.kind {
+                    ExprKind::Literal(Literal::Int { value, .. }) => assert_eq!(value, "0"),
+                    _ => panic!("Expected index int literal"),
+                }
+            }
+            _ => panic!("Expected index expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_chained_access() {
+        let expr = parse_single_expression("obj.field[1].method()").unwrap();
+        match &expr.kind {
+            ExprKind::Call { func, args } => {
+                assert!(args.is_empty());
+                match &func.kind {
+                    ExprKind::Field { base, field } => {
+                        assert_eq!(field, "method");
+                        match &base.kind {
+                            ExprKind::Index { base: inner_base, .. } => {
+                                match &inner_base.kind {
+                                    ExprKind::Field { base: inner_inner, field: inner_field } => {
+                                        assert_eq!(inner_field, "field");
+                                        match &inner_inner.kind {
+                                            ExprKind::Ident(name) => assert_eq!(name, "obj"),
+                                            _ => panic!("Expected obj ident"),
+                                        }
+                                    }
+                                    _ => panic!("Expected nested field access"),
+                                }
+                            }
+                            _ => panic!("Expected index access"),
+                        }
+                    }
+                    _ => panic!("Expected field access"),
+                }
+            }
+            _ => panic!("Expected call expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_tuple() {
+        let expr = parse_single_expression("(a, b, c)").unwrap();
+        match &expr.kind {
+            ExprKind::Tuple { elements } => {
+                assert_eq!(elements.len(), 3);
+                match &elements[0].kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "a"),
+                    _ => panic!("Expected first element"),
+                }
+                match &elements[1].kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "b"),
+                    _ => panic!("Expected second element"),
+                }
+                match &elements[2].kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "c"),
+                    _ => panic!("Expected third element"),
+                }
+            }
+            _ => panic!("Expected tuple expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_single_element_tuple() {
+        let expr = parse_single_expression("(value)").unwrap();
+        match &expr.kind {
+            ExprKind::Ident(name) => assert_eq!(name, "value"),
+            _ => panic!("Expected single element to be unwrapped"),
+        }
+    }
+
+    #[test]
+    fn test_parse_array() {
+        let expr = parse_single_expression("[1, 2, 3]").unwrap();
+        match &expr.kind {
+            ExprKind::Array { elements } => {
+                assert_eq!(elements.len(), 3);
+                match &elements[0].kind {
+                    ExprKind::Literal(Literal::Int { value, .. }) => assert_eq!(value, "1"),
+                    _ => panic!("Expected first element 1"),
+                }
+                match &elements[1].kind {
+                    ExprKind::Literal(Literal::Int { value, .. }) => assert_eq!(value, "2"),
+                    _ => panic!("Expected second element 2"),
+                }
+                match &elements[2].kind {
+                    ExprKind::Literal(Literal::Int { value, .. }) => assert_eq!(value, "3"),
+                    _ => panic!("Expected third element 3"),
+                }
+            }
+            _ => panic!("Expected array expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_empty_array() {
+        let expr = parse_single_expression("[]").unwrap();
+        match &expr.kind {
+            ExprKind::Array { elements } => {
+                assert!(elements.is_empty());
+            }
+            _ => panic!("Expected empty array expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_simple_map() {
+        match parse_single_expression("{a => b}") {
+            Ok(expr) => {
+                match &expr.kind {
+                    ExprKind::Map { entries } => {
+                        assert_eq!(entries.len(), 1);
+                    }
+                    _ => panic!("Expected map, got {:?}", expr.kind),
+                }
+            }
+            Err(e) => panic!("Error: {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_parse_map() {
+        let expr = parse_single_expression("{key => value, x => 42}").unwrap();
+        match &expr.kind {
+            ExprKind::Map { entries } => {
+                assert_eq!(entries.len(), 2);
+                match &entries[0] {
+                    (key, value) => {
+                        match &key.kind {
+                            ExprKind::Ident(name) => assert_eq!(name, "key"),
+                            _ => panic!("Expected key ident"),
+                        }
+                        match &value.kind {
+                            ExprKind::Ident(name) => assert_eq!(name, "value"),
+                            _ => panic!("Expected value ident"),
+                        }
+                    }
+                }
+                match &entries[1] {
+                    (key, value) => {
+                        match &key.kind {
+                            ExprKind::Ident(name) => assert_eq!(name, "x"),
+                            _ => panic!("Expected key x"),
+                        }
+                        match &value.kind {
+                            ExprKind::Literal(Literal::Int { value: v, .. }) => assert_eq!(v, "42"),
+                            _ => panic!("Expected value 42"),
+                        }
+                    }
+                }
+            }
+            _ => panic!("Expected map expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_struct_construction() {
+        let expr = parse_single_expression("Point { x: 1, y: 2 }").unwrap();
+        match &expr.kind {
+            ExprKind::Struct { path, fields, .. } => {
+                assert_eq!(path.segments[0].ident, "Point");
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0].name.as_ref().unwrap(), "x");
+                assert_eq!(fields[1].name.as_ref().unwrap(), "y");
+            }
+            _ => panic!("Expected struct expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_struct_shorthand() {
+        let expr = parse_single_expression("Point { x, y }").unwrap();
+        match &expr.kind {
+            ExprKind::Struct { path, fields, .. } => {
+                assert_eq!(path.segments[0].ident, "Point");
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0].name.as_ref().unwrap(), "x");
+                assert_eq!(fields[1].name.as_ref().unwrap(), "y");
+                // Check that values are idents
+                match &fields[0].value.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "x"),
+                    _ => panic!("Expected shorthand value"),
+                }
+            }
+            _ => panic!("Expected struct expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_enum_variant_construction() {
+        let expr = parse_single_expression("Option::Some(42)").unwrap();
+        match &expr.kind {
+            ExprKind::EnumVariant { path, args } => {
+                assert_eq!(path.segments.len(), 2);
+                assert_eq!(path.segments[0].ident, "Option");
+                assert_eq!(path.segments[1].ident, "Some");
+                assert_eq!(args.len(), 1);
+                match &args[0].kind {
+                    ExprKind::Literal(Literal::Int { value, .. }) => assert_eq!(value, "42"),
+                    _ => panic!("Expected arg 42"),
+                }
+            }
+            _ => panic!("Expected enum variant expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_path() {
+        let expr = parse_single_expression("std::io::println").unwrap();
+        match &expr.kind {
+            ExprKind::Path(path) => {
+                assert_eq!(path.segments.len(), 3);
+                assert_eq!(path.segments[0].ident, "std");
+                assert_eq!(path.segments[1].ident, "io");
+                assert_eq!(path.segments[2].ident, "println");
+            }
+            _ => panic!("Expected path expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_if_expression() {
+        let expr = parse_single_expression("if condition result").unwrap();
+        match &expr.kind {
+            ExprKind::If { condition, then_branch, else_branch } => {
+                match &condition.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "condition"),
+                    _ => panic!("Expected condition ident"),
+                }
+                match &then_branch.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "result"),
+                    _ => panic!("Expected then ident"),
+                }
+                assert!(else_branch.is_none());
+            }
+            _ => panic!("Expected if expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_if_else_expression() {
+        let expr = parse_single_expression("if flag true else false").unwrap();
+        match &expr.kind {
+            ExprKind::If { condition, then_branch, else_branch } => {
+                match &condition.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "flag"),
+                    _ => panic!("Expected condition ident"),
+                }
+                match &then_branch.kind {
+                    ExprKind::Literal(Literal::Bool(b)) => assert!(*b),
+                    _ => panic!("Expected then true"),
+                }
+                match &else_branch.as_ref().unwrap().kind {
+                    ExprKind::Literal(Literal::Bool(b)) => assert!(!*b),
+                    _ => panic!("Expected else false"),
+                }
+            }
+            _ => panic!("Expected if-else expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_match_expression() {
+        let expr = parse_single_expression("match value\n  1 => \"one\"\n  2 => \"two\"\nend").unwrap();
+        match &expr.kind {
+            ExprKind::Match { scrutinee, arms } => {
+                match &scrutinee.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "value"),
+                    _ => panic!("Expected scrutinee ident"),
+                }
+                assert_eq!(arms.len(), 2);
+                match &arms[0].body.kind {
+                    ExprKind::Literal(Literal::String(s)) => assert_eq!(s, "\"one\""),
+                    _ => panic!("Expected first arm body"),
+                }
+                match &arms[1].body.kind {
+                    ExprKind::Literal(Literal::String(s)) => assert_eq!(s, "\"two\""),
+                    _ => panic!("Expected second arm body"),
+                }
+            }
+            _ => panic!("Expected match expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_or_pattern() {
+        let expr = parse_single_expression("match value\n  1 | 2 => \"one or two\"\nend").unwrap();
+        match &expr.kind {
+            ExprKind::Match { scrutinee, arms } => {
+                assert_eq!(arms.len(), 1);
+                match &arms[0].pattern.kind {
+                    PatternKind::Or { patterns } => {
+                        assert_eq!(patterns.len(), 2);
+                        match &patterns[0].kind {
+                            PatternKind::Literal(Literal::Int { value, .. }) => assert_eq!(value, "1"),
+                            _ => panic!("Expected first pattern literal"),
+                        }
+                        match &patterns[1].kind {
+                            PatternKind::Literal(Literal::Int { value, .. }) => assert_eq!(value, "2"),
+                            _ => panic!("Expected second pattern literal"),
+                        }
+                    }
+                    _ => panic!("Expected or pattern"),
+                }
+            }
+            _ => panic!("Expected match expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_or_pattern_multiple() {
+        let expr = parse_single_expression("match value\n  1 | 2 | 3 => \"small\"\nend").unwrap();
+        match &expr.kind {
+            ExprKind::Match { scrutinee, arms } => {
+                assert_eq!(arms.len(), 1);
+                match &arms[0].pattern.kind {
+                    PatternKind::Or { patterns } => {
+                        assert_eq!(patterns.len(), 3);
+                        for (i, expected) in ["1", "2", "3"].iter().enumerate() {
+                            match &patterns[i].kind {
+                                PatternKind::Literal(Literal::Int { value, .. }) => assert_eq!(value, expected),
+                                _ => panic!("Expected pattern literal {}", i),
+                            }
+                        }
+                    }
+                    _ => panic!("Expected or pattern"),
+                }
+            }
+            _ => panic!("Expected match expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_for_loop() {
+        let expr = parse_single_expression("for x in list x * 2").unwrap();
+        match &expr.kind {
+            ExprKind::For { pattern, iterator, body } => {
+                match &pattern.kind {
+                    PatternKind::Ident { name, mutable } => {
+                        assert_eq!(name, "x");
+                        assert!(!mutable);
+                    }
+                    _ => panic!("Expected pattern ident"),
+                }
+                match &iterator.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "list"),
+                    _ => panic!("Expected iterator ident"),
+                }
+                match &body.kind {
+                    ExprKind::Binary { op, .. } => assert_eq!(op, &BinOp::Mul),
+                    _ => panic!("Expected body binary"),
+                }
+            }
+            _ => panic!("Expected for expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_while_loop() {
+        let expr = parse_single_expression("while condition action").unwrap();
+        match &expr.kind {
+            ExprKind::While { condition, body } => {
+                match &condition.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "condition"),
+                    _ => panic!("Expected condition ident"),
+                }
+                match &body.kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "action"),
+                    _ => panic!("Expected body ident"),
+                }
+            }
+            _ => panic!("Expected while expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_block_expression() {
+        let expr = parse_single_expression("do\n  x = 1\n  y = 2\n  x + y\nend").unwrap();
+        match &expr.kind {
+            ExprKind::Block { exprs } => {
+                assert_eq!(exprs.len(), 3);
+                match &exprs[0].kind {
+                    ExprKind::Assign { .. } => {}
+                    _ => panic!("Expected first assignment"),
+                }
+                match &exprs[1].kind {
+                    ExprKind::Assign { .. } => {}
+                    _ => panic!("Expected second assignment"),
+                }
+                match &exprs[2].kind {
+                    ExprKind::Binary { op, .. } => assert_eq!(op, &BinOp::Add),
+                    _ => panic!("Expected final addition"),
+                }
+            }
+            _ => panic!("Expected block expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_break_expression() {
+        let expr = parse_single_expression("break").unwrap();
+        match &expr.kind {
+            ExprKind::Break { value } => {
+                assert!(value.is_none());
+            }
+            _ => panic!("Expected break expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_break_with_value() {
+        let expr = parse_single_expression("break result").unwrap();
+        match &expr.kind {
+            ExprKind::Break { value } => {
+                match &value.as_ref().unwrap().kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "result"),
+                    _ => panic!("Expected break value ident"),
+                }
+            }
+            _ => panic!("Expected break expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_continue_expression() {
+        let expr = parse_single_expression("continue").unwrap();
+        match &expr.kind {
+            ExprKind::Continue => {}
+            _ => panic!("Expected continue expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_return_expression() {
+        let expr = parse_single_expression("return").unwrap();
+        match &expr.kind {
+            ExprKind::Return { value } => {
+                assert!(value.is_none());
+            }
+            _ => panic!("Expected return expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_return_with_value() {
+        let expr = parse_single_expression("return value").unwrap();
+        match &expr.kind {
+            ExprKind::Return { value } => {
+                match &value.as_ref().unwrap().kind {
+                    ExprKind::Ident(name) => assert_eq!(name, "value"),
+                    _ => panic!("Expected return value ident"),
+                }
+            }
+            _ => panic!("Expected return expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_defer_expression() {
+        let expr = parse_single_expression("defer cleanup()").unwrap();
+        match &expr.kind {
+            ExprKind::Defer { .. } => {}
+            _ => panic!("Expected defer expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_spawn_expression() {
+        let expr = parse_single_expression("spawn task()").unwrap();
+        match &expr.kind {
+            ExprKind::Spawn { .. } => {}
+            _ => panic!("Expected spawn expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_comptime_expression() {
+        let expr = parse_single_expression("comptime 1 + 2").unwrap();
+        match &expr.kind {
+            ExprKind::Comptime { expr: inner } => {
+                match &inner.kind {
+                    ExprKind::Binary { op, .. } => assert_eq!(op, &BinOp::Add),
+                    _ => panic!("Expected binary in comptime"),
+                }
+            }
+            _ => panic!("Expected comptime expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_range_expression() {
+        let expr = parse_single_expression("1..10").unwrap();
+        match &expr.kind {
+            ExprKind::Range { start, end, inclusive } => {
+                match &start.as_ref().unwrap().kind {
+                    ExprKind::Literal(Literal::Int { value, .. }) => assert_eq!(value, "1"),
+                    _ => panic!("Expected start 1"),
+                }
+                match &end.as_ref().unwrap().kind {
+                    ExprKind::Literal(Literal::Int { value, .. }) => assert_eq!(value, "10"),
+                    _ => panic!("Expected end 10"),
+                }
+                assert!(!inclusive);
+            }
+            _ => panic!("Expected range expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_inclusive_range_expression() {
+        let expr = parse_single_expression("1..=10").unwrap();
+        match &expr.kind {
+            ExprKind::Range { start, end, inclusive } => {
+                assert!(inclusive);
+            }
+            _ => panic!("Expected inclusive range expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_range_from_start() {
+        let expr = parse_single_expression("5..").unwrap();
+        match &expr.kind {
+            ExprKind::Range { start, end, inclusive } => {
+                match &start.as_ref().unwrap().kind {
+                    ExprKind::Literal(Literal::Int { value, .. }) => assert_eq!(value, "5"),
+                    _ => panic!("Expected start 5"),
+                }
+                assert!(end.is_none());
+                assert!(!inclusive);
+            }
+            _ => panic!("Expected range from start"),
+        }
+    }
+
+    #[test]
+    fn test_parse_range_to_end() {
+        let expr = parse_single_expression("..10").unwrap();
+        match &expr.kind {
+            ExprKind::Range { start, end, inclusive } => {
+                assert!(start.is_none());
+                match &end.as_ref().unwrap().kind {
+                    ExprKind::Literal(Literal::Int { value, .. }) => assert_eq!(value, "10"),
+                    _ => panic!("Expected end 10"),
+                }
+                assert!(!inclusive);
+            }
+            _ => panic!("Expected range to end"),
         }
     }
 }
