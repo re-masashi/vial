@@ -2,6 +2,7 @@
 
 module Vial.TypedAST where
 
+import Data.Bifunctor
 import Vial.AST (BinOp, Ident, Literal, MacroBody, Metadata, Type, UnOp)
 import Vial.AST qualified as AST
 
@@ -36,6 +37,7 @@ data TypedExprKind where
   TEMove :: TypedExpr -> TypedExprKind
   TERefMut :: TypedExpr -> TypedExprKind
   TEAnonRecord :: [(Ident, TypedExpr)] -> TypedExprKind
+  TECast :: TypedExpr -> Type -> TypedExprKind
   deriving (Show, Eq)
 
 data TypedPattern where
@@ -204,6 +206,8 @@ instance TypedVisitor (TypedIdentity TypedExprKind) where
     TypedIdentity (TERefMut (runTypedIdentity (visitTypedExpr e)))
   visitTypedExprKind (TEAnonRecord fields) =
     TypedIdentity (TEAnonRecord (map (\(i, e) -> (i, runTypedIdentity (visitTypedExpr e))) fields))
+  visitTypedExprKind (TECast e t) =
+    TypedIdentity (TECast (runTypedIdentity (visitTypedExpr e)) t)
 
 instance TypedVisitor (TypedIdentity TypedPattern) where
   visitTypedPattern (TypedPattern meta typ kind) =
@@ -308,7 +312,8 @@ untypeExpr (TypedExpr meta _ kind) = AST.Expr meta (untypeExprKind kind)
     untypeExprKind (TEDefer e) = AST.EDefer (untypeExpr e)
     untypeExprKind (TEMove e) = AST.EMove (untypeExpr e)
     untypeExprKind (TERefMut e) = AST.ERefMut (untypeExpr e)
-    untypeExprKind (TEAnonRecord fields) = AST.EAnonRecord (map (\(i, e) -> (i, untypeExpr e)) fields)
+    untypeExprKind (TEAnonRecord fields) = AST.EAnonRecord (map (Data.Bifunctor.second untypeExpr) fields)
+    untypeExprKind (TECast e t) = AST.ECast (untypeExpr e) t
 
     untypeMatchArm :: TypedMatchArm -> AST.MatchArm
     untypeMatchArm (TypedMatchArm armMeta pat expr) = AST.MatchArm armMeta (untypePattern pat) (untypeExpr expr)
@@ -321,7 +326,7 @@ untypePattern (TypedPattern meta _ kind) = AST.Pattern meta (untypePatternKind k
     untypePatternKind (TPVar i) = AST.PVar i
     untypePatternKind (TPLit l) = AST.PLit l
     untypePatternKind (TPCon i ps) = AST.PCon i (map untypePattern ps)
-    untypePatternKind (TPStruct i fields) = AST.PStruct i (map (\(j, p) -> (j, untypePattern p)) fields)
+    untypePatternKind (TPStruct i fields) = AST.PStruct i (map (Data.Bifunctor.second untypePattern) fields)
     untypePatternKind TPWildcard = AST.PWildcard
 
 -- | Extract the untyped declaration from a typed declaration

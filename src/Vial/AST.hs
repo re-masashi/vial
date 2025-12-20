@@ -3,7 +3,9 @@
 module Vial.AST where
 
 type Ident = String
+
 type SourceFile = String
+
 data Span where
   Span :: {spanStart :: Int, spanEnd :: Int} -> Span
   deriving (Show, Eq)
@@ -123,6 +125,7 @@ data ExprKind where
   EMove :: Expr -> ExprKind
   ERefMut :: Expr -> ExprKind
   EAnonRecord :: [(Ident, Expr)] -> ExprKind
+  ECast :: Expr -> Type -> ExprKind
   deriving (Show, Eq)
 
 data MacroBody where
@@ -287,7 +290,7 @@ class Visitor r where
   visitImportKind :: ImportKind -> r
 
 -- Identity visitor for tree walking
-newtype Identity a = Identity { runIdentity :: a }
+newtype Identity a = Identity {runIdentity :: a}
 
 instance Visitor (Identity Kind) where
   visitKind KStar = Identity KStar
@@ -302,17 +305,17 @@ instance Visitor (Identity TypeKind) where
   visitTypeKind (TyApp t1 t2) = Identity (TyApp (runIdentity (visitType t1)) (runIdentity (visitType t2)))
   visitTypeKind (TyFunc ts t) = Identity (TyFunc (map (runIdentity . visitType) ts) (runIdentity (visitType t)))
   visitTypeKind (TyOption t) = Identity (TyOption (runIdentity (visitType t)))
-  visitTypeKind (TyRecord fields m) = Identity (TyRecord (map (\(i,t) -> (i, runIdentity (visitType t))) fields) m)
+  visitTypeKind (TyRecord fields m) = Identity (TyRecord (map (\(i, t) -> (i, runIdentity (visitType t))) fields) m)
   visitTypeKind (TyKinded i k) = Identity (TyKinded i (runIdentity (visitKind k)))
 
 instance Visitor (Identity Literal) where
-  visitLiteral l = Identity l
+  visitLiteral = Identity
 
 instance Visitor (Identity BinOp) where
-  visitBinOp op = Identity op
+  visitBinOp = Identity
 
 instance Visitor (Identity UnOp) where
-  visitUnOp op = Identity op
+  visitUnOp = Identity
 
 instance Visitor (Identity Pattern) where
   visitPattern (Pattern meta kind) = Identity (Pattern meta (runIdentity (visitPatternKind kind)))
@@ -321,7 +324,7 @@ instance Visitor (Identity PatternKind) where
   visitPatternKind (PVar i) = Identity (PVar i)
   visitPatternKind (PLit l) = Identity (PLit (runIdentity (visitLiteral l)))
   visitPatternKind (PCon i ps) = Identity (PCon i (map (runIdentity . visitPattern) ps))
-  visitPatternKind (PStruct i fields) = Identity (PStruct i (map (\(j,p) -> (j, runIdentity (visitPattern p))) fields))
+  visitPatternKind (PStruct i fields) = Identity (PStruct i (map (\(j, p) -> (j, runIdentity (visitPattern p))) fields))
   visitPatternKind PWildcard = Identity PWildcard
 
 instance Visitor (Identity Expr) where
@@ -348,7 +351,8 @@ instance Visitor (Identity ExprKind) where
   visitExprKind (EDefer e) = Identity (EDefer (runIdentity (visitExpr e)))
   visitExprKind (EMove e) = Identity (EMove (runIdentity (visitExpr e)))
   visitExprKind (ERefMut e) = Identity (ERefMut (runIdentity (visitExpr e)))
-  visitExprKind (EAnonRecord fields) = Identity (EAnonRecord (map (\(i,e) -> (i, runIdentity (visitExpr e))) fields))
+  visitExprKind (EAnonRecord fields) = Identity (EAnonRecord (map (\(i, e) -> (i, runIdentity (visitExpr e))) fields))
+  visitExprKind (ECast e t) = Identity (ECast (runIdentity (visitExpr e)) (runIdentity (visitType t)))
 
 instance Visitor (Identity MacroBody) where
   visitMacroBody (MExprs es) = Identity (MExprs (map (runIdentity . visitExpr) es))
