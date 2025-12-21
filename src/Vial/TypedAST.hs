@@ -230,157 +230,124 @@ class TypedVisitor r where
 
 newtype TypedIdentity a = TypedIdentity {runTypedIdentity :: a}
 
+instance Functor TypedIdentity where
+  fmap f (TypedIdentity a) = TypedIdentity (f a)
+
+instance Applicative TypedIdentity where
+  pure = TypedIdentity
+  TypedIdentity f <*> TypedIdentity a = TypedIdentity (f a)
+
+instance Monad TypedIdentity where
+  return = pure
+  TypedIdentity a >>= f = f a
+
 instance TypedVisitor (TypedIdentity InferredType) where
-  visitInferredType (InferredType kind) = TypedIdentity (InferredType (runTypedIdentity (visitInferredTypeKind kind)))
+  visitInferredType (InferredType kind) = InferredType <$> visitInferredTypeKind kind
 
 instance TypedVisitor (TypedIdentity InferredTypeKind) where
-  visitInferredTypeKind (ITyVar i) = TypedIdentity (ITyVar i)
-  visitInferredTypeKind (ITyCon i) = TypedIdentity (ITyCon i)
-  visitInferredTypeKind (ITyApp t1 t2) = TypedIdentity (ITyApp (runTypedIdentity (visitInferredType t1)) (runTypedIdentity (visitInferredType t2)))
-  visitInferredTypeKind (ITyFunc ts t) = TypedIdentity (ITyFunc (map (runTypedIdentity . visitInferredType) ts) (runTypedIdentity (visitInferredType t)))
-  visitInferredTypeKind (ITyForall vars t) = TypedIdentity (ITyForall (map (\(i, k) -> (i, runTypedIdentity (visitKind k))) vars) (runTypedIdentity (visitInferredType t)))
-  visitInferredTypeKind (ITyOption t) = TypedIdentity (ITyOption (runTypedIdentity (visitInferredType t)))
-  visitInferredTypeKind (ITyRecord fields) = TypedIdentity (ITyRecord (map (\(i, t) -> (i, runTypedIdentity (visitInferredType t))) fields))
-  visitInferredTypeKind (ITyLam i t) = TypedIdentity (ITyLam i (runTypedIdentity (visitInferredType t)))
+  visitInferredTypeKind (ITyVar i) = pure (ITyVar i)
+  visitInferredTypeKind (ITyCon i) = pure (ITyCon i)
+  visitInferredTypeKind (ITyApp t1 t2) = ITyApp <$> visitInferredType t1 <*> visitInferredType t2
+  visitInferredTypeKind (ITyFunc ts t) = ITyFunc <$> traverse visitInferredType ts <*> visitInferredType t
+  visitInferredTypeKind (ITyForall vars t) = ITyForall <$> traverse (\(i, k) -> (,) i <$> visitKind k) vars <*> visitInferredType t
+  visitInferredTypeKind (ITyOption t) = ITyOption <$> visitInferredType t
+  visitInferredTypeKind (ITyRecord fields) = ITyRecord <$> traverse (\(i, t) -> (,) i <$> visitInferredType t) fields
+  visitInferredTypeKind (ITyLam i t) = ITyLam i <$> visitInferredType t
 
 instance TypedVisitor (TypedIdentity Kind) where
-  visitKind Star = TypedIdentity Star
-  visitKind (KArrow k1 k2) = TypedIdentity (KArrow (runTypedIdentity (visitKind k1)) (runTypedIdentity (visitKind k2)))
+  visitKind Star = pure Star
+  visitKind (KArrow k1 k2) = KArrow <$> visitKind k1 <*> visitKind k2
 
 instance TypedVisitor (TypedIdentity TypedParam) where
-  visitTypedParam (TypedParam meta name typ mut) = TypedIdentity (TypedParam meta name (runTypedIdentity (visitInferredType typ)) mut)
+  visitTypedParam (TypedParam meta name typ mut) = TypedParam meta name <$> visitInferredType typ <*> pure mut
 
 instance TypedVisitor (TypedIdentity TypedField) where
-  visitTypedField (TypedField meta name typ) = TypedIdentity (TypedField meta name (runTypedIdentity (visitInferredType typ)))
+  visitTypedField (TypedField meta name typ) = TypedField meta name <$> visitInferredType typ
 
 instance TypedVisitor (TypedIdentity TypedVariant) where
-  visitTypedVariant (TypedVariant meta kind) = TypedIdentity (TypedVariant meta (runTypedIdentity (visitTypedVariantKind kind)))
+  visitTypedVariant (TypedVariant meta kind) = TypedVariant meta <$> visitTypedVariantKind kind
 
 instance TypedVisitor (TypedIdentity TypedVariantKind) where
-  visitTypedVariantKind (TVSimple i) = TypedIdentity (TVSimple i)
-  visitTypedVariantKind (TVTuple i ts mt) = TypedIdentity (TVTuple i (map (runTypedIdentity . visitInferredType) ts) (fmap (runTypedIdentity . visitInferredType) mt))
-  visitTypedVariantKind (TVStruct i fields mt) = TypedIdentity (TVStruct i (map (runTypedIdentity . visitTypedField) fields) (fmap (runTypedIdentity . visitInferredType) mt))
+  visitTypedVariantKind (TVSimple i) = pure (TVSimple i)
+  visitTypedVariantKind (TVTuple i ts mt) = TVTuple i <$> traverse visitInferredType ts <*> traverse visitInferredType mt
+  visitTypedVariantKind (TVStruct i fields mt) = TVStruct i <$> traverse visitTypedField fields <*> traverse visitInferredType mt
 
 instance TypedVisitor (TypedIdentity TypedExpr) where
-  visitTypedExpr (TypedExpr meta typ kind) =
-    TypedIdentity (TypedExpr meta (runTypedIdentity (visitInferredType typ)) (runTypedIdentity (visitTypedExprKind kind)))
+  visitTypedExpr (TypedExpr meta typ kind) = TypedExpr meta <$> visitInferredType typ <*> visitTypedExprKind kind
 
 instance TypedVisitor (TypedIdentity TypedExprKind) where
-  visitTypedExprKind (TELit l) = TypedIdentity (TELit l)
-  visitTypedExprKind (TEVar i) = TypedIdentity (TEVar i)
-  visitTypedExprKind (TEBinOp op e1 e2) =
-    TypedIdentity (TEBinOp op (runTypedIdentity (visitTypedExpr e1)) (runTypedIdentity (visitTypedExpr e2)))
-  visitTypedExprKind (TEUnOp op e) =
-    TypedIdentity (TEUnOp op (runTypedIdentity (visitTypedExpr e)))
-  visitTypedExprKind (TEIf c t f) =
-    TypedIdentity (TEIf (runTypedIdentity (visitTypedExpr c)) (runTypedIdentity (visitTypedExpr t)) (runTypedIdentity (visitTypedExpr f)))
-  visitTypedExprKind (TEMatch e arms) =
-    TypedIdentity (TEMatch (runTypedIdentity (visitTypedExpr e)) (map (runTypedIdentity . visitTypedMatchArm) arms))
-  visitTypedExprKind (TEBlock es) =
-    TypedIdentity (TEBlock (map (runTypedIdentity . visitTypedExpr) es))
-  visitTypedExprKind (TECall e es) =
-    TypedIdentity (TECall (runTypedIdentity (visitTypedExpr e)) (map (runTypedIdentity . visitTypedExpr) es))
-  visitTypedExprKind (TELambda ps e) =
-    TypedIdentity (TELambda (map (runTypedIdentity . visitTypedParam) ps) (runTypedIdentity (visitTypedExpr e)))
-  visitTypedExprKind (TEField e i) =
-    TypedIdentity (TEField (runTypedIdentity (visitTypedExpr e)) i)
-  visitTypedExprKind (TEMethod e i es) =
-    TypedIdentity (TEMethod (runTypedIdentity (visitTypedExpr e)) i (map (runTypedIdentity . visitTypedExpr) es))
-  visitTypedExprKind (TESpawn i es) =
-    TypedIdentity (TESpawn i (map (runTypedIdentity . visitTypedExpr) es))
-  visitTypedExprKind (TESend e1 e2) =
-    TypedIdentity (TESend (runTypedIdentity (visitTypedExpr e1)) (runTypedIdentity (visitTypedExpr e2)))
-  visitTypedExprKind (TEReceive arms) =
-    TypedIdentity (TEReceive (map (runTypedIdentity . visitTypedMatchArm) arms))
-  visitTypedExprKind (TEMacro i body) =
-    TypedIdentity (TEMacro i body)
-  visitTypedExprKind (TELet i t e b) =
-    TypedIdentity (TELet i (runTypedIdentity (visitInferredType t)) (runTypedIdentity (visitTypedExpr e)) b)
-  visitTypedExprKind (TEAssign e1 e2) =
-    TypedIdentity (TEAssign (runTypedIdentity (visitTypedExpr e1)) (runTypedIdentity (visitTypedExpr e2)))
-  visitTypedExprKind (TEFor i e1 e2) =
-    TypedIdentity (TEFor i (runTypedIdentity (visitTypedExpr e1)) (runTypedIdentity (visitTypedExpr e2)))
-  visitTypedExprKind (TEDefer e) =
-    TypedIdentity (TEDefer (runTypedIdentity (visitTypedExpr e)))
-  visitTypedExprKind (TEMove e) =
-    TypedIdentity (TEMove (runTypedIdentity (visitTypedExpr e)))
-  visitTypedExprKind (TERefMut e) =
-    TypedIdentity (TERefMut (runTypedIdentity (visitTypedExpr e)))
-  visitTypedExprKind (TEAnonRecord fields) =
-    TypedIdentity (TEAnonRecord (map (\(i, e) -> (i, runTypedIdentity (visitTypedExpr e))) fields))
-  visitTypedExprKind (TECast e t) =
-    TypedIdentity (TECast (runTypedIdentity (visitTypedExpr e)) (runTypedIdentity (visitInferredType t)))
+  visitTypedExprKind (TELit l) = pure (TELit l)
+  visitTypedExprKind (TEVar i) = pure (TEVar i)
+  visitTypedExprKind (TEBinOp op e1 e2) = TEBinOp op <$> visitTypedExpr e1 <*> visitTypedExpr e2
+  visitTypedExprKind (TEUnOp op e) = TEUnOp op <$> visitTypedExpr e
+  visitTypedExprKind (TEIf c t f) = TEIf <$> visitTypedExpr c <*> visitTypedExpr t <*> visitTypedExpr f
+  visitTypedExprKind (TEMatch e arms) = TEMatch <$> visitTypedExpr e <*> traverse visitTypedMatchArm arms
+  visitTypedExprKind (TEBlock es) = TEBlock <$> traverse visitTypedExpr es
+  visitTypedExprKind (TECall e es) = TECall <$> visitTypedExpr e <*> traverse visitTypedExpr es
+  visitTypedExprKind (TELambda ps e) = TELambda <$> traverse visitTypedParam ps <*> visitTypedExpr e
+  visitTypedExprKind (TEField e i) = TEField <$> visitTypedExpr e <*> pure i
+  visitTypedExprKind (TEMethod e i es) = TEMethod <$> visitTypedExpr e <*> pure i <*> traverse visitTypedExpr es
+  visitTypedExprKind (TESpawn i es) = TESpawn i <$> traverse visitTypedExpr es
+  visitTypedExprKind (TESend e1 e2) = TESend <$> visitTypedExpr e1 <*> visitTypedExpr e2
+  visitTypedExprKind (TEReceive arms) = TEReceive <$> traverse visitTypedMatchArm arms
+  visitTypedExprKind (TEMacro i body) = pure (TEMacro i body)
+  visitTypedExprKind (TELet i t e b) = TELet i <$> visitInferredType t <*> visitTypedExpr e <*> pure b
+  visitTypedExprKind (TEAssign e1 e2) = TEAssign <$> visitTypedExpr e1 <*> visitTypedExpr e2
+  visitTypedExprKind (TEFor i e1 e2) = TEFor i <$> visitTypedExpr e1 <*> visitTypedExpr e2
+  visitTypedExprKind (TEDefer e) = TEDefer <$> visitTypedExpr e
+  visitTypedExprKind (TEMove e) = TEMove <$> visitTypedExpr e
+  visitTypedExprKind (TERefMut e) = TERefMut <$> visitTypedExpr e
+  visitTypedExprKind (TEAnonRecord fields) = TEAnonRecord <$> traverse (\(i, e) -> (,) i <$> visitTypedExpr e) fields
+  visitTypedExprKind (TECast e t) = TECast <$> visitTypedExpr e <*> visitInferredType t
 
 instance TypedVisitor (TypedIdentity TypedPattern) where
-  visitTypedPattern (TypedPattern meta typ kind) =
-    TypedIdentity (TypedPattern meta (runTypedIdentity (visitInferredType typ)) (runTypedIdentity (visitTypedPatternKind kind)))
+  visitTypedPattern (TypedPattern meta typ kind) = TypedPattern meta <$> visitInferredType typ <*> visitTypedPatternKind kind
 
 instance TypedVisitor (TypedIdentity TypedPatternKind) where
-  visitTypedPatternKind (TPVar i) = TypedIdentity (TPVar i)
-  visitTypedPatternKind (TPLit l) = TypedIdentity (TPLit l)
-  visitTypedPatternKind (TPCon i ps) =
-    TypedIdentity (TPCon i (map (runTypedIdentity . visitTypedPattern) ps))
-  visitTypedPatternKind (TPStruct i fields) =
-    TypedIdentity (TPStruct i (map (\(j, p) -> (j, runTypedIdentity (visitTypedPattern p))) fields))
-  visitTypedPatternKind TPWildcard = TypedIdentity TPWildcard
+  visitTypedPatternKind (TPVar i) = pure (TPVar i)
+  visitTypedPatternKind (TPLit l) = pure (TPLit l)
+  visitTypedPatternKind (TPCon i ps) = TPCon i <$> traverse visitTypedPattern ps
+  visitTypedPatternKind (TPStruct i fields) = TPStruct i <$> traverse (\(j, p) -> (,) j <$> visitTypedPattern p) fields
+  visitTypedPatternKind TPWildcard = pure TPWildcard
 
 instance TypedVisitor (TypedIdentity TypedMatchArm) where
-  visitTypedMatchArm (TypedMatchArm meta pat expr) =
-    TypedIdentity (TypedMatchArm meta (runTypedIdentity (visitTypedPattern pat)) (runTypedIdentity (visitTypedExpr expr)))
+  visitTypedMatchArm (TypedMatchArm meta pat expr) = TypedMatchArm meta <$> visitTypedPattern pat <*> visitTypedExpr expr
 
 instance TypedVisitor (TypedIdentity TypedDecl) where
-  visitTypedDecl (TypedDecl meta kind) =
-    TypedIdentity (TypedDecl meta (runTypedIdentity (visitTypedDeclKind kind)))
+  visitTypedDecl (TypedDecl meta kind) = TypedDecl meta <$> visitTypedDeclKind kind
 
 instance TypedVisitor (TypedIdentity TypedDeclKind) where
-  visitTypedDeclKind (TDFunc i tps ps t e) =
-    TypedIdentity (TDFunc i tps (map (runTypedIdentity . visitTypedParam) ps) (runTypedIdentity (visitInferredType t)) (runTypedIdentity (visitTypedExpr e)))
-  visitTypedDeclKind (TDStruct i tps fields) =
-    TypedIdentity (TDStruct i tps (map (runTypedIdentity . visitTypedField) fields))
-  visitTypedDeclKind (TDEnum i tps vars) =
-    TypedIdentity (TDEnum i tps (map (runTypedIdentity . visitTypedVariant) vars))
-  visitTypedDeclKind (TDTrait i tps items) =
-    TypedIdentity (TDTrait i tps (map (runTypedIdentity . visitTypedTraitItem) items))
-  visitTypedDeclKind (TDImpl i tps t items) =
-    TypedIdentity (TDImpl i tps (runTypedIdentity (visitInferredType t)) (map (runTypedIdentity . visitTypedImplItem) items))
-  visitTypedDeclKind (TDActor i items) =
-    TypedIdentity (TDActor i (map (runTypedIdentity . visitTypedActorItem) items))
+  visitTypedDeclKind (TDFunc i tps ps t e) = TDFunc i tps <$> traverse visitTypedParam ps <*> visitInferredType t <*> visitTypedExpr e
+  visitTypedDeclKind (TDStruct i tps fields) = TDStruct i tps <$> traverse visitTypedField fields
+  visitTypedDeclKind (TDEnum i tps vars) = TDEnum i tps <$> traverse visitTypedVariant vars
+  visitTypedDeclKind (TDTrait i tps items) = TDTrait i tps <$> traverse visitTypedTraitItem items
+  visitTypedDeclKind (TDImpl i tps t items) = TDImpl i tps <$> visitInferredType t <*> traverse visitTypedImplItem items
+  visitTypedDeclKind (TDActor i items) = TDActor i <$> traverse visitTypedActorItem items
 
 instance TypedVisitor (TypedIdentity TypedTraitItem) where
-  visitTypedTraitItem (TypedTraitItem meta kind) =
-    TypedIdentity (TypedTraitItem meta (runTypedIdentity (visitTypedTraitItemKind kind)))
+  visitTypedTraitItem (TypedTraitItem meta kind) = TypedTraitItem meta <$> visitTypedTraitItemKind kind
 
 instance TypedVisitor (TypedIdentity TypedTraitItemKind) where
-  visitTypedTraitItemKind (TTFunc i tps ps t me) =
-    TypedIdentity (TTFunc i tps (map (runTypedIdentity . visitTypedParam) ps) (runTypedIdentity (visitInferredType t)) (fmap (runTypedIdentity . visitTypedExpr) me))
-  visitTypedTraitItemKind (TTType i t) =
-    TypedIdentity (TTType i (runTypedIdentity (visitInferredType t)))
+  visitTypedTraitItemKind (TTFunc i tps ps t me) = TTFunc i tps <$> traverse visitTypedParam ps <*> visitInferredType t <*> traverse visitTypedExpr me
+  visitTypedTraitItemKind (TTType i t) = TTType i <$> visitInferredType t
 
 instance TypedVisitor (TypedIdentity TypedImplItem) where
-  visitTypedImplItem (TypedImplItem meta kind) =
-    TypedIdentity (TypedImplItem meta (runTypedIdentity (visitTypedImplItemKind kind)))
+  visitTypedImplItem (TypedImplItem meta kind) = TypedImplItem meta <$> visitTypedImplItemKind kind
 
 instance TypedVisitor (TypedIdentity TypedImplItemKind) where
-  visitTypedImplItemKind (TIFunc i tps ps t e) =
-    TypedIdentity (TIFunc i tps (map (runTypedIdentity . visitTypedParam) ps) (runTypedIdentity (visitInferredType t)) (runTypedIdentity (visitTypedExpr e)))
-  visitTypedImplItemKind (TIType i t) =
-    TypedIdentity (TIType i (runTypedIdentity (visitInferredType t)))
+  visitTypedImplItemKind (TIFunc i tps ps t e) = TIFunc i tps <$> traverse visitTypedParam ps <*> visitInferredType t <*> visitTypedExpr e
+  visitTypedImplItemKind (TIType i t) = TIType i <$> visitInferredType t
 
 instance TypedVisitor (TypedIdentity TypedActorItem) where
-  visitTypedActorItem (TypedActorItem meta kind) =
-    TypedIdentity (TypedActorItem meta (runTypedIdentity (visitTypedActorItemKind kind)))
+  visitTypedActorItem (TypedActorItem meta kind) = TypedActorItem meta <$> visitTypedActorItemKind kind
 
 instance TypedVisitor (TypedIdentity TypedActorItemKind) where
-  visitTypedActorItemKind (TALet i t e b) =
-    TypedIdentity (TALet i (runTypedIdentity (visitInferredType t)) (runTypedIdentity (visitTypedExpr e)) b)
-  visitTypedActorItemKind (TABehavior i ps e) =
-    TypedIdentity (TABehavior i (map (runTypedIdentity . visitTypedParam) ps) (runTypedIdentity (visitTypedExpr e)))
-  visitTypedActorItemKind (TAReceive arms) =
-    TypedIdentity (TAReceive (map (runTypedIdentity . visitTypedMatchArm) arms))
+  visitTypedActorItemKind (TALet i t e b) = TALet i <$> visitInferredType t <*> visitTypedExpr e <*> pure b
+  visitTypedActorItemKind (TABehavior i ps e) = TABehavior i <$> traverse visitTypedParam ps <*> visitTypedExpr e
+  visitTypedActorItemKind (TAReceive arms) = TAReceive <$> traverse visitTypedMatchArm arms
 
 instance TypedVisitor (TypedIdentity TypedProgram) where
-  visitTypedProgram (TypedProgram imps decls) =
-    TypedIdentity (TypedProgram imps (map (runTypedIdentity . visitTypedDecl) decls))
+  visitTypedProgram (TypedProgram imps decls) = TypedProgram imps <$> traverse visitTypedDecl decls
 
 -- | Get the type of a typed expression
 typeOf :: TypedExpr -> InferredType
