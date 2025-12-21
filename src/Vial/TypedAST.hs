@@ -2,7 +2,6 @@
 
 module Vial.TypedAST where
 
-
 import Vial.AST (BinOp, Ident, Literal, MacroBody, Metadata, UnOp)
 import Vial.AST qualified as AST
 
@@ -228,7 +227,7 @@ class (Monad m) => TypedVisitor m where
   visitTypedActorItemKind :: TypedActorItemKind -> m AST.ActorItemKind
   visitTypedProgram :: TypedProgram -> m AST.Program
 
-newtype Untype a = Untype { runUntype :: a }
+newtype Untype a = Untype {runUntype :: a}
 
 instance Functor Untype where
   fmap f (Untype a) = Untype (f a)
@@ -250,10 +249,10 @@ instance TypedVisitor Untype where
   visitInferredTypeKind (ITyCon i) = pure (AST.TyCon i [])
   visitInferredTypeKind (ITyApp t1 t2) = AST.TyApp <$> visitInferredType t1 <*> visitInferredType t2
   visitInferredTypeKind (ITyFunc ts t) = AST.TyFunc <$> traverse visitInferredType ts <*> visitInferredType t
-  visitInferredTypeKind (ITyForall _ t) = AST.typeKind <$> visitInferredType t  -- ignore forall and kinds for untyping
+  visitInferredTypeKind (ITyForall _ t) = AST.typeKind <$> visitInferredType t -- ignore forall and kinds for untyping
   visitInferredTypeKind (ITyOption t) = AST.TyOption <$> visitInferredType t
   visitInferredTypeKind (ITyRecord fields) = AST.TyRecord <$> traverse (\(i, t) -> (,) i <$> visitInferredType t) fields <*> pure Nothing
-  visitInferredTypeKind (ITyLam _ t) = AST.typeKind <$> visitInferredType t  -- ignore type lambda for untyping
+  visitInferredTypeKind (ITyLam _ t) = AST.typeKind <$> visitInferredType t -- ignore type lambda for untyping
 
   visitKind Star = pure AST.KStar
   visitKind (KArrow k1 k2) = AST.KArr <$> visitKind k1 <*> visitKind k2
@@ -285,7 +284,7 @@ instance TypedVisitor Untype where
   visitTypedExprKind (TESend e1 e2) = AST.ESend <$> visitTypedExpr e1 <*> visitTypedExpr e2
   visitTypedExprKind (TEReceive arms) = AST.EReceive <$> traverse visitTypedMatchArm arms
   visitTypedExprKind (TEMacro i body) = pure (AST.EMacro i body)
-  visitTypedExprKind (TELet i t e b) = AST.ELet i <$> (Just <$> visitInferredType t) <*> visitTypedExpr e <*> pure b
+  visitTypedExprKind (TELet i t e b) = (AST.ELet i . Just <$> visitInferredType t) <*> visitTypedExpr e <*> pure b
   visitTypedExprKind (TEAssign e1 e2) = AST.EAssign <$> visitTypedExpr e1 <*> visitTypedExpr e2
   visitTypedExprKind (TEFor i e1 e2) = AST.EFor i <$> visitTypedExpr e1 <*> visitTypedExpr e2
   visitTypedExprKind (TEDefer e) = AST.EDefer <$> visitTypedExpr e
@@ -316,7 +315,7 @@ instance TypedVisitor Untype where
   visitTypedTraitItem (TypedTraitItem meta kind) = AST.TraitItem meta <$> visitTypedTraitItemKind kind
 
   visitTypedTraitItemKind (TTFunc i tps ps t me) = AST.TFunc i tps <$> traverse visitTypedParam ps <*> (Just <$> visitInferredType t) <*> traverse visitTypedExpr me
-  visitTypedTraitItemKind (TTType i _) = pure (AST.TType i)  -- ignore type for untyping trait type
+  visitTypedTraitItemKind (TTType i _) = pure (AST.TType i) -- ignore type for untyping trait type
 
   visitTypedImplItem (TypedImplItem meta kind) = AST.ImplItem meta <$> visitTypedImplItemKind kind
 
@@ -325,7 +324,7 @@ instance TypedVisitor Untype where
 
   visitTypedActorItem (TypedActorItem meta kind) = AST.ActorItem meta <$> visitTypedActorItemKind kind
 
-  visitTypedActorItemKind (TALet i t e b) = AST.ALet i <$> (Just <$> visitInferredType t) <*> visitTypedExpr e <*> pure b
+  visitTypedActorItemKind (TALet i t e b) = (AST.ALet i . Just <$> visitInferredType t) <*> visitTypedExpr e <*> pure b
   visitTypedActorItemKind (TABehavior i ps e) = AST.ABehavior i <$> traverse visitTypedParam ps <*> visitTypedExpr e
   visitTypedActorItemKind (TAReceive arms) = AST.AReceive <$> traverse visitTypedMatchArm arms
 
