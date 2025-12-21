@@ -10,6 +10,7 @@ Row polymorphism
 Generics with constraints
 Type aliases
 Newtype wrappers
+Constants
 
 Memory & Resources:
 
@@ -41,6 +42,7 @@ Exhaustive match on errors
 Metaprogramming:
 
 Comptime code execution
+Comptime expressions (comptime keyword)
 Hygienic macros
 Type reflection at comptime
 Code generation via quote/unquote

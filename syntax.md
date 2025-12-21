@@ -13,17 +13,24 @@ let mut y = 20;
 let z: Float = 3.14;
 ```
 
-### 1.2 Functions
+### 1.2 Constants
+```vial
+const MAX_SIZE: Int = 1024;
+const PI: Float = 3.14159;
+const CONFIG: String = comptime load_config();
+```
+
+### 1.3 Functions
 ```vial
 def add(a: Int, b: Int) -> Int {
     a + b
 }
 
-# Generic function
+// Generic function
 def id<T>(x: T) -> T { x }
 ```
 
-### 1.3 Structs & Fields
+### 1.4 Structs & Fields
 ```vial
 struct User {
     id: Int,
@@ -31,13 +38,13 @@ struct User {
     name: String,
 }
 
-# Field access
+// Field access
 user.name
-# Method call
+// Method call
 user.login()
 ```
 
-### 1.4 Enums & Variants
+### 1.5 Enums & Variants
 ```vial
 enum Message {
     Quit,
@@ -45,33 +52,42 @@ enum Message {
     Write(String),
 }
 
-# Variant access
-Message::Quit
+// Variant construction
+let quit = Message::Quit;
+let move_msg = Message::Move { x: 10, y: 20 };
+let write_msg = Message::Write("hello");
+
+// Variant access in patterns
+match msg {
+    Message::Quit => print("Quitting"),
+    Message::Move { x, y } => print("Moving to #{x}, #{y}"),
+    Message::Write(text) => print("Writing: #{text}")
+}
 ```
 
-### 1.5 Actors & Behaviors
+### 1.6 Actors & Behaviors
 ```vial
 actor Clock {
     let mut ticks = 0;
     
-    # Asynchronous behavior
+    // Asynchronous behavior
     be tick() {
         ticks += 1;
     }
     
-    # Message handler
+    // Message handler
     receive {
         Event::Reset => ticks = 0
     }
     
-    # Hot swap handler
-    be @upgrade(old: { ticks: Int }) {
+    // Hot swap handler
+    be upgrade(old: { ticks: Int }) {
         ticks = old.ticks;
     }
 }
 ```
 
-### 1.6 Traits & Implementations
+### 1.7 Traits & Implementations
 ```vial
 trait Container<T> {
     type Item;
@@ -82,9 +98,14 @@ impl Container<List<Int>> {
     type Item = Int;
     def add(self: mut List<Int>, item: Int) { ... }
 }
+
+// Dynamic dispatch
+def process_items(items: dyn Container<Int>) {
+    items.add(42);
+}
 ```
 
-### 1.7 GADTs
+### 1.8 GADTs
 ```vial
 enum Expr<T> {
     Int(Int) : Expr<Int>,
@@ -104,11 +125,27 @@ enum Expr<T> {
 - Pipeline: `|>`
 
 ### 2.2 Macros
-Macros are invoked with `::`.
+Macros are invoked with `!`.
 ```vial
-debug::(x);
-sql::"SELECT * FROM users";
-html::{ div { "Hello" } }
+debug!(x);
+sql!"SELECT * FROM users";
+html!{ div { "Hello" } }
+```
+
+### 2.3 Error Propagation
+```vial
+// ? operator for early return
+def process_data(data: Option<String>) -> Result<String, String> {
+    let text = data?;  // Returns None if data is None
+    Result::Ok(text.to_uppercase())
+}
+```
+
+### 2.4 Comptime Expressions
+```vial
+// Compile-time evaluation
+const SIZE: Int = comptime 2 * 1024;
+let config = comptime parse_json_file("config.json");
 ```
 
 ### 2.3 Attributes
@@ -122,31 +159,42 @@ struct S { @meta f: Int }
 
 ### 2.4 Control Flow
 ```vial
-# If
-let x = if cond { 1 } else { 2 };
+// If
+let x = if cond 1 else 2;
 
-# Match
+// Match
 match val {
     1 => "One",
     _ => "Other"
 }
 
-# For
-for i in 1..10 { print(i); }
+// For
+for i in 1..10 print(i)
+
+// While
+while condition expr
+
+// Lambda expressions (not exactly control flow, but yeah)
+let add = |x, y| -> x + y;
+let identity = |x| -> x;
 ```
+
+### 2.5 Expression Groups
+
+Expressions are grouped using `{` and `}`
 
 ---
 
 ## 3. Concurrency
 
 ```vial
-# Spawn actor
+// Spawn actor
 let p = spawn MyActor();
 
-# Async Behavior Call
+// Async Behavior Call
 p.do_work();
 
-# Explicit Send
+// Explicit Send
 send p, Message::Data(42);
 ```
 
@@ -155,13 +203,13 @@ send p, Message::Data(42);
 ## 4. Ownership & Borrowing
 
 ```vial
-# Borrow (Default)
+// Borrow (Default)
 func(val);
 
-# Move (Explicit)
+// Move (Explicit)
 func(move val);
 
-# Mutable Borrow
+// Mutable Borrow
 func(&mut val);
 ```
 
@@ -171,7 +219,7 @@ func(&mut val);
 
 ```vial
 import std::io;
-import data::{Map, Set};
+import data::{Map as MyMap, Set};
 import network as net;
 
 pub def start() { ... }
