@@ -26,7 +26,7 @@ def add(a: Int, b: Int) -> Int {
     a + b
 }
 
-# Generic function
+// Generic function
 def id<T>(x: T) -> T { x }
 ```
 
@@ -38,9 +38,9 @@ struct User {
     name: String,
 }
 
-# Field access
+// Field access
 user.name
-# Method call
+// Method call
 user.login()
 ```
 
@@ -52,12 +52,12 @@ enum Message {
     Write(String),
 }
 
-# Variant construction
+// Variant construction
 let quit = Message::Quit;
 let move_msg = Message::Move { x: 10, y: 20 };
 let write_msg = Message::Write("hello");
 
-# Variant access in patterns
+// Variant access in patterns
 match msg {
     Message::Quit => print("Quitting"),
     Message::Move { x, y } => print("Moving to #{x}, #{y}"),
@@ -70,18 +70,18 @@ match msg {
 actor Clock {
     let mut ticks = 0;
     
-    # Asynchronous behavior
+    // Asynchronous behavior
     be tick() {
         ticks += 1;
     }
     
-    # Message handler
+    // Message handler
     receive {
         Event::Reset => ticks = 0
     }
     
-    # Hot swap handler
-    be @upgrade(old: { ticks: Int }) {
+    // Hot swap handler
+    be upgrade(old: { ticks: Int }) {
         ticks = old.ticks;
     }
 }
@@ -99,7 +99,7 @@ impl Container<List<Int>> {
     def add(self: mut List<Int>, item: Int) { ... }
 }
 
-# Dynamic dispatch
+// Dynamic dispatch
 def process_items(items: dyn Container<Int>) {
     items.add(42);
 }
@@ -125,25 +125,25 @@ enum Expr<T> {
 - Pipeline: `|>`
 
 ### 2.2 Macros
-Macros are invoked with `::`.
+Macros are invoked with `!`.
 ```vial
-debug::(x);
-sql::"SELECT * FROM users";
-html::{ div { "Hello" } }
+debug!(x);
+sql!"SELECT * FROM users";
+html!{ div { "Hello" } }
 ```
 
 ### 2.3 Error Propagation
 ```vial
-# ? operator for early return
+// ? operator for early return
 def process_data(data: Option<String>) -> Result<String, String> {
-    let text = data?;  # Returns None if data is None
+    let text = data?;  // Returns None if data is None
     Result::Ok(text.to_uppercase())
 }
 ```
 
 ### 2.4 Comptime Expressions
 ```vial
-# Compile-time evaluation
+// Compile-time evaluation
 const SIZE: Int = comptime 2 * 1024;
 let config = comptime parse_json_file("config.json");
 ```
@@ -159,35 +159,42 @@ struct S { @meta f: Int }
 
 ### 2.4 Control Flow
 ```vial
-# If
-let x = if cond { 1 } else { 2 };
+// If
+let x = if cond 1 else 2;
 
-# Match
+// Match
 match val {
     1 => "One",
     _ => "Other"
 }
 
-# For
-for i in 1..10 { print(i); }
+// For
+for i in 1..10 print(i)
 
-# Lambda expressions
+// While
+while condition expr
+
+// Lambda expressions (not exactly control flow, but yeah)
 let add = |x, y| -> x + y;
 let identity = |x| -> x;
 ```
+
+### 2.5 Expression Groups
+
+Expressions are grouped using `{` and `}`
 
 ---
 
 ## 3. Concurrency
 
 ```vial
-# Spawn actor
+// Spawn actor
 let p = spawn MyActor();
 
-# Async Behavior Call
+// Async Behavior Call
 p.do_work();
 
-# Explicit Send
+// Explicit Send
 send p, Message::Data(42);
 ```
 
@@ -196,13 +203,13 @@ send p, Message::Data(42);
 ## 4. Ownership & Borrowing
 
 ```vial
-# Borrow (Default)
+// Borrow (Default)
 func(val);
 
-# Move (Explicit)
+// Move (Explicit)
 func(move val);
 
-# Mutable Borrow
+// Mutable Borrow
 func(&mut val);
 ```
 
@@ -212,7 +219,7 @@ func(&mut val);
 
 ```vial
 import std::io;
-import data::{Map, Set};
+import data::{Map as MyMap, Set};
 import network as net;
 
 pub def start() { ... }

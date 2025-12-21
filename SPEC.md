@@ -1,27 +1,34 @@
-# Vial Language Specification (SPEC)
+# Vial "Spec"
 
-Vial is a high-performance, statically-typed language designed for modern web backends.
+Vial's primary target domains are:
+- Metaprogramming heavy stuff (compilers etc)
+- Webdev
 
 ---
 
-## 1. Syntax & Philosophy
+## 1. Syntax
 
-### 1.1 Core Principles
-- **Explicit over Implicit**: Braces `{}` are used for blocks (not whitespace sensitive). Semicolons `;` are optional.
+### 1.1 Basics 
+- **Explicit over Implicit**: Braces `{}` are used for blocks. Semicolons `;` are optional.
 - **Boilerplate Free**: Extensive type inference and structural records.
 - **Expression Oriented**: Every construct (if, match, block) returns a value.
 
 ### 1.2 Comments
-- Single-line: `# comment`
-- Documentation: `## doc comment` or `@doc("...")` attribute.
+- Single-line: `// comment`
+- Documentation: `@doc("...")` attribute.
 
 ### 1.3 Variables & Mutability
 ```vial
-let x = 10;         # Immutable
-let mut y = 20;     # Mutable
-y = 30;             # OK
+let x = 10;         // Immutable
+let mut y = 20;     // Mutable
+y = 30;             // OK
 ```
 Shadowing is permitted within the same or nested scopes.
+
+```vial
+let x = 10;
+let x = "aaaa";
+```
 
 ### 1.4 Constants
 Top-level constants are evaluated at compile time and are immutable.
@@ -47,7 +54,7 @@ struct User {
 enum Status {
     Pending,
     Active(User),
-    Inactive(reason: String)
+    Inactive(String)
 }
 ```
 
@@ -143,8 +150,6 @@ def greet<R>(obj: { name: String, .. R }) {
 - **Explicit Move**: Use `move`.
 - **Mutable Borrowing**: Use `&mut`.
 
-### 3.2 Resource Safety (RAII & Defer)
-- **Drop Trait**: Automatic destructor.
 - **Defer**: Scheduled execution.
 
 ---
@@ -204,7 +209,7 @@ actor Counter {
     let mut count = 0;
     
     ## Called when actor is upgraded
-    be @upgrade(old_state: { count: Int }) {
+    be upgrade(old_state: { count: Int }) {
         count = old_state.count;
     }
 }
@@ -218,14 +223,15 @@ Supervisors manage actor failure via restart strategies.
 ## 5. Metaprogramming
 
 ### 5.1 Macros
-Macros are invoked with `::`.
+Macros are invoked with `!`.
 ```vial
 macro debug(expr) { ... }
-debug::(x);
+debug!(x);
 ```
 
 ### 5.2 Comptime Reflection API
 The `reflect` module provides compile-time access to the AST.
+
 ```vial
 comptime {
     let ty = reflect::type_of<User>();
@@ -244,22 +250,16 @@ let config = comptime load_config_file();
 
 ## 6. Performance
 
-### 6.1 SIMD Intrinsics
-Native support for vectorized operations.
-```vial
-@simd
-def vec_add(a: f32x4, b: f32x4) -> f32x4 { a + b }
-```
-
-### 6.2 Tail Call Optimization (TCO)
+### 6.1 Tail Call Optimization (TCO)
 The compiler guarantees TCO for all self-recursive or cross-recursive calls marked with `@tco` or where inferred.
 
 ---
 
 ## 7. Web & First-Class JSON
 Structural records map directly to JSON objects.
+TODO: auto impl of JSON serialization trait for types
 ```vial
 let json = { id: 1, type: "login" };
 let id = json.id;
 ```
-Built-in `sql::` macros for safe, compile-time verified queries.
+Built-in `sql!` macros for safe, compile-time verified queries.
