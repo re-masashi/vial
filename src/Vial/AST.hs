@@ -147,15 +147,15 @@ data DeclKind where
   deriving (Show, Eq)
 
 data TypeParam where
-  TypeParam :: { tpMeta :: Metadata, tpName :: Ident, tpKind :: Maybe Kind } -> TypeParam
+  TypeParam :: {tpMeta :: Metadata, tpName :: Ident, tpKind :: Maybe Kind} -> TypeParam
   deriving (Show, Eq)
 
 data Param where
-  Param :: { paramMeta :: Metadata, paramName :: Ident, paramType :: Type, paramMut :: Bool } -> Param
+  Param :: {paramMeta :: Metadata, paramName :: Ident, paramType :: Type, paramMut :: Bool} -> Param
   deriving (Show, Eq)
 
 data Field where
-  Field :: { fieldMeta :: Metadata, fieldName :: Ident, fieldType :: Type } -> Field
+  Field :: {fieldMeta :: Metadata, fieldName :: Ident, fieldType :: Type} -> Field
   deriving (Show, Eq)
 
 data Variant where
@@ -209,15 +209,13 @@ data ImportKind where
   ImportQualified :: [Ident] -> [Ident] -> ImportKind
   deriving (Show, Eq)
 
--- | The Visitor class, modeled after the Rust Visitor trait.
--- It provides default implementations (the "walk" functions) which can be overridden.
-class Monad m => Visitor m where
+class (Monad m) => Visitor m where
   visitKind :: Kind -> m Kind
   visitKind = defaultVisitKind
-  
+
   visitType :: Type -> m Type
   visitType = defaultVisitType
-  
+
   visitTypeKind :: TypeKind -> m TypeKind
   visitTypeKind = defaultVisitTypeKind
 
@@ -296,18 +294,14 @@ class Monad m => Visitor m where
   visitImportKind :: ImportKind -> m ImportKind
   visitImportKind = defaultVisitImportKind
 
--- Default "Walk" Implementations
--- These correspond to the `walk_*` functions in the Rust example.
--- They traverse the structure recursively using the Visitor methods.
-
-defaultVisitKind :: Visitor m => Kind -> m Kind
+defaultVisitKind :: (Visitor m) => Kind -> m Kind
 defaultVisitKind KStar = pure KStar
 defaultVisitKind (KArr k1 k2) = KArr <$> visitKind k1 <*> visitKind k2
 
-defaultVisitType :: Visitor m => Type -> m Type
+defaultVisitType :: (Visitor m) => Type -> m Type
 defaultVisitType (Type meta kind) = Type meta <$> visitTypeKind kind
 
-defaultVisitTypeKind :: Visitor m => TypeKind -> m TypeKind
+defaultVisitTypeKind :: (Visitor m) => TypeKind -> m TypeKind
 defaultVisitTypeKind (TyVar i) = pure (TyVar i)
 defaultVisitTypeKind (TyCon i ts) = TyCon i <$> traverse visitType ts
 defaultVisitTypeKind (TyApp t1 t2) = TyApp <$> visitType t1 <*> visitType t2
@@ -316,29 +310,29 @@ defaultVisitTypeKind (TyOption t) = TyOption <$> visitType t
 defaultVisitTypeKind (TyRecord fields m) = TyRecord <$> traverse (\(i, t) -> (,) i <$> visitType t) fields <*> pure m
 defaultVisitTypeKind (TyKinded i k) = TyKinded i <$> visitKind k
 
-defaultVisitLiteral :: Visitor m => Literal -> m Literal
+defaultVisitLiteral :: (Visitor m) => Literal -> m Literal
 defaultVisitLiteral = pure
 
-defaultVisitBinOp :: Visitor m => BinOp -> m BinOp
+defaultVisitBinOp :: (Visitor m) => BinOp -> m BinOp
 defaultVisitBinOp = pure
 
-defaultVisitUnOp :: Visitor m => UnOp -> m UnOp
+defaultVisitUnOp :: (Visitor m) => UnOp -> m UnOp
 defaultVisitUnOp = pure
 
-defaultVisitPattern :: Visitor m => Pattern -> m Pattern
+defaultVisitPattern :: (Visitor m) => Pattern -> m Pattern
 defaultVisitPattern (Pattern meta kind) = Pattern meta <$> visitPatternKind kind
 
-defaultVisitPatternKind :: Visitor m => PatternKind -> m PatternKind
+defaultVisitPatternKind :: (Visitor m) => PatternKind -> m PatternKind
 defaultVisitPatternKind (PVar i) = pure (PVar i)
 defaultVisitPatternKind (PLit l) = PLit <$> visitLiteral l
 defaultVisitPatternKind (PCon i ps) = PCon i <$> traverse visitPattern ps
 defaultVisitPatternKind (PStruct i fields) = PStruct i <$> traverse (\(j, p) -> (,) j <$> visitPattern p) fields
 defaultVisitPatternKind PWildcard = pure PWildcard
 
-defaultVisitExpr :: Visitor m => Expr -> m Expr
+defaultVisitExpr :: (Visitor m) => Expr -> m Expr
 defaultVisitExpr (Expr meta kind) = Expr meta <$> visitExprKind kind
 
-defaultVisitExprKind :: Visitor m => ExprKind -> m ExprKind
+defaultVisitExprKind :: (Visitor m) => ExprKind -> m ExprKind
 defaultVisitExprKind (ELit l) = ELit <$> visitLiteral l
 defaultVisitExprKind (EVar i) = pure (EVar i)
 defaultVisitExprKind (EBinOp op e1 e2) = EBinOp <$> visitBinOp op <*> visitExpr e1 <*> visitExpr e2
@@ -363,18 +357,18 @@ defaultVisitExprKind (ERefMut e) = ERefMut <$> visitExpr e
 defaultVisitExprKind (EAnonRecord fields) = EAnonRecord <$> traverse (\(i, e) -> (,) i <$> visitExpr e) fields
 defaultVisitExprKind (ECast e t) = ECast <$> visitExpr e <*> visitType t
 
-defaultVisitMacroBody :: Visitor m => MacroBody -> m MacroBody
+defaultVisitMacroBody :: (Visitor m) => MacroBody -> m MacroBody
 defaultVisitMacroBody (MExprs es) = MExprs <$> traverse visitExpr es
 defaultVisitMacroBody (MString s) = pure (MString s)
 defaultVisitMacroBody (MBlock es) = MBlock <$> traverse visitExpr es
 
-defaultVisitMatchArm :: Visitor m => MatchArm -> m MatchArm
+defaultVisitMatchArm :: (Visitor m) => MatchArm -> m MatchArm
 defaultVisitMatchArm (MatchArm meta pat expr) = MatchArm meta <$> visitPattern pat <*> visitExpr expr
 
-defaultVisitDecl :: Visitor m => Decl -> m Decl
+defaultVisitDecl :: (Visitor m) => Decl -> m Decl
 defaultVisitDecl (Decl meta kind) = Decl meta <$> visitDeclKind kind
 
-defaultVisitDeclKind :: Visitor m => DeclKind -> m DeclKind
+defaultVisitDeclKind :: (Visitor m) => DeclKind -> m DeclKind
 defaultVisitDeclKind (DFunc i tps ps mt e) = DFunc i <$> traverse visitTypeParam tps <*> traverse visitParam ps <*> traverse visitType mt <*> visitExpr e
 defaultVisitDeclKind (DStruct i tps fields) = DStruct i <$> traverse visitTypeParam tps <*> traverse visitField fields
 defaultVisitDeclKind (DEnum i tps vars) = DEnum i <$> traverse visitTypeParam tps <*> traverse visitVariant vars
@@ -382,52 +376,52 @@ defaultVisitDeclKind (DTrait i tps items) = DTrait i <$> traverse visitTypeParam
 defaultVisitDeclKind (DImpl i tps t items) = DImpl i <$> traverse visitTypeParam tps <*> visitType t <*> traverse visitImplItem items
 defaultVisitDeclKind (DActor i items) = DActor i <$> traverse visitActorItem items
 
-defaultVisitTypeParam :: Visitor m => TypeParam -> m TypeParam
+defaultVisitTypeParam :: (Visitor m) => TypeParam -> m TypeParam
 defaultVisitTypeParam (TypeParam meta name mk) = TypeParam meta name <$> traverse visitKind mk
 
-defaultVisitParam :: Visitor m => Param -> m Param
+defaultVisitParam :: (Visitor m) => Param -> m Param
 defaultVisitParam (Param meta name typ mut) = Param meta name <$> visitType typ <*> pure mut
 
-defaultVisitField :: Visitor m => Field -> m Field
+defaultVisitField :: (Visitor m) => Field -> m Field
 defaultVisitField (Field meta name typ) = Field meta name <$> visitType typ
 
-defaultVisitVariant :: Visitor m => Variant -> m Variant
+defaultVisitVariant :: (Visitor m) => Variant -> m Variant
 defaultVisitVariant (Variant meta kind) = Variant meta <$> visitVariantKind kind
 
-defaultVisitVariantKind :: Visitor m => VariantKind -> m VariantKind
+defaultVisitVariantKind :: (Visitor m) => VariantKind -> m VariantKind
 defaultVisitVariantKind (VSimple i) = pure (VSimple i)
 defaultVisitVariantKind (VTuple i ts mt) = VTuple i <$> traverse visitType ts <*> traverse visitType mt
 defaultVisitVariantKind (VStruct i fields mt) = VStruct i <$> traverse visitField fields <*> traverse visitType mt
 
-defaultVisitTraitItem :: Visitor m => TraitItem -> m TraitItem
+defaultVisitTraitItem :: (Visitor m) => TraitItem -> m TraitItem
 defaultVisitTraitItem (TraitItem meta kind) = TraitItem meta <$> visitTraitItemKind kind
 
-defaultVisitTraitItemKind :: Visitor m => TraitItemKind -> m TraitItemKind
+defaultVisitTraitItemKind :: (Visitor m) => TraitItemKind -> m TraitItemKind
 defaultVisitTraitItemKind (TFunc i tps ps mt me) = TFunc i <$> traverse visitTypeParam tps <*> traverse visitParam ps <*> traverse visitType mt <*> traverse visitExpr me
 defaultVisitTraitItemKind (TType i) = pure (TType i)
 
-defaultVisitImplItem :: Visitor m => ImplItem -> m ImplItem
+defaultVisitImplItem :: (Visitor m) => ImplItem -> m ImplItem
 defaultVisitImplItem (ImplItem meta kind) = ImplItem meta <$> visitImplItemKind kind
 
-defaultVisitImplItemKind :: Visitor m => ImplItemKind -> m ImplItemKind
+defaultVisitImplItemKind :: (Visitor m) => ImplItemKind -> m ImplItemKind
 defaultVisitImplItemKind (IFunc i tps ps mt e) = IFunc i <$> traverse visitTypeParam tps <*> traverse visitParam ps <*> traverse visitType mt <*> visitExpr e
 defaultVisitImplItemKind (IType i t) = IType i <$> visitType t
 
-defaultVisitActorItem :: Visitor m => ActorItem -> m ActorItem
+defaultVisitActorItem :: (Visitor m) => ActorItem -> m ActorItem
 defaultVisitActorItem (ActorItem meta kind) = ActorItem meta <$> visitActorItemKind kind
 
-defaultVisitActorItemKind :: Visitor m => ActorItemKind -> m ActorItemKind
+defaultVisitActorItemKind :: (Visitor m) => ActorItemKind -> m ActorItemKind
 defaultVisitActorItemKind (ALet i mt e b) = ALet i <$> traverse visitType mt <*> visitExpr e <*> pure b
 defaultVisitActorItemKind (ABehavior i ps e) = ABehavior i <$> traverse visitParam ps <*> visitExpr e
 defaultVisitActorItemKind (AReceive arms) = AReceive <$> traverse visitMatchArm arms
 
-defaultVisitProgram :: Visitor m => Program -> m Program
+defaultVisitProgram :: (Visitor m) => Program -> m Program
 defaultVisitProgram (Program imps decls) = Program <$> traverse visitImport imps <*> traverse visitDecl decls
 
-defaultVisitImport :: Visitor m => Import -> m Import
+defaultVisitImport :: (Visitor m) => Import -> m Import
 defaultVisitImport (Import meta kind) = Import meta <$> visitImportKind kind
 
-defaultVisitImportKind :: Visitor m => ImportKind -> m ImportKind
+defaultVisitImportKind :: (Visitor m) => ImportKind -> m ImportKind
 defaultVisitImportKind (ImportSimple ids mi) = pure (ImportSimple ids mi)
 defaultVisitImportKind (ImportQualified ids1 ids2) = pure (ImportQualified ids1 ids2)
 
