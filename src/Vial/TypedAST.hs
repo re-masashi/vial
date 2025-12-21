@@ -366,10 +366,10 @@ untypeType (InferredType kind) = AST.Type dummyMeta (untypeTypeKind kind)
     untypeTypeKind (ITyCon i) = AST.TyCon i []
     untypeTypeKind (ITyApp t1 t2) = AST.TyApp (untypeType t1) (untypeType t2)
     untypeTypeKind (ITyFunc ts t) = AST.TyFunc (map untypeType ts) (untypeType t)
-    untypeTypeKind (ITyForall _ t) = AST.typeKind (untypeType t)  -- ignore forall and kinds for untyping
+    untypeTypeKind (ITyForall _ t) = AST.typeKind (untypeType t) -- ignore forall and kinds for untyping
     untypeTypeKind (ITyOption t) = AST.TyOption (untypeType t)
-    untypeTypeKind (ITyRecord fields) = AST.TyRecord (map (\(i, t) -> (i, untypeType t)) fields) Nothing
-    untypeTypeKind (ITyLam _ t) = AST.typeKind (untypeType t)  -- ignore type lambda for untyping
+    untypeTypeKind (ITyRecord fields) = AST.TyRecord (map (second untypeType) fields) Nothing
+    untypeTypeKind (ITyLam _ t) = AST.typeKind (untypeType t) -- ignore type lambda for untyping
 
 untypeTypedParam :: TypedParam -> AST.Param
 untypeTypedParam (TypedParam meta name typ mut) = AST.Param meta name (untypeType typ) mut
