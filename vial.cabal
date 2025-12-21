@@ -61,7 +61,8 @@ library
     exposed-modules:
         MyLib,
         Vial.AST,
-        Vial.TypedAST
+        Vial.TypedAST,
+        Vial.Desugar
 
     -- Modules included in this library but not exported.
     -- other-modules:
