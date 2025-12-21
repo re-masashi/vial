@@ -85,6 +85,7 @@ data TypedExprKind where
   TEMatch :: TypedExpr -> [TypedMatchArm] -> TypedExprKind
   TEBlock :: [TypedExpr] -> TypedExprKind
   TECall :: TypedExpr -> [TypedExpr] -> TypedExprKind
+  TELambda :: [TypedParam] -> TypedExpr -> TypedExprKind
   TEField :: TypedExpr -> Ident -> TypedExprKind
   TEMethod :: TypedExpr -> Ident -> [TypedExpr] -> TypedExprKind
   TESpawn :: Ident -> [TypedExpr] -> TypedExprKind
@@ -279,6 +280,8 @@ instance TypedVisitor (TypedIdentity TypedExprKind) where
     TypedIdentity (TEBlock (map (runTypedIdentity . visitTypedExpr) es))
   visitTypedExprKind (TECall e es) =
     TypedIdentity (TECall (runTypedIdentity (visitTypedExpr e)) (map (runTypedIdentity . visitTypedExpr) es))
+  visitTypedExprKind (TELambda ps e) =
+    TypedIdentity (TELambda (map (runTypedIdentity . visitTypedParam) ps) (runTypedIdentity (visitTypedExpr e)))
   visitTypedExprKind (TEField e i) =
     TypedIdentity (TEField (runTypedIdentity (visitTypedExpr e)) i)
   visitTypedExprKind (TEMethod e i es) =
@@ -427,6 +430,7 @@ untypeExpr (TypedExpr meta _ kind) = AST.Expr meta (untypeExprKind kind)
     untypeExprKind (TEMatch e arms) = AST.EMatch (untypeExpr e) (map untypeMatchArm arms)
     untypeExprKind (TEBlock es) = AST.EBlock (map untypeExpr es)
     untypeExprKind (TECall e es) = AST.ECall (untypeExpr e) (map untypeExpr es)
+    untypeExprKind (TELambda ps e) = AST.ELambda (map untypeTypedParam ps) (untypeExpr e)
     untypeExprKind (TEField e i) = AST.EField (untypeExpr e) i
     untypeExprKind (TEMethod e i es) = AST.EMethod (untypeExpr e) i (map untypeExpr es)
     untypeExprKind (TESpawn i es) = AST.ESpawn i (map untypeExpr es)

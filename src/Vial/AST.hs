@@ -112,6 +112,7 @@ data ExprKind where
   EMatch :: Expr -> [MatchArm] -> ExprKind
   EBlock :: [Expr] -> ExprKind
   ECall :: Expr -> [Expr] -> ExprKind
+  ELambda :: [Param] -> Expr -> ExprKind
   EField :: Expr -> Ident -> ExprKind
   EMethod :: Expr -> Ident -> [Expr] -> ExprKind
   ESpawn :: Ident -> [Expr] -> ExprKind
@@ -339,6 +340,7 @@ instance Visitor (Identity ExprKind) where
   visitExprKind (EMatch e arms) = Identity (EMatch (runIdentity (visitExpr e)) (map (runIdentity . visitMatchArm) arms))
   visitExprKind (EBlock es) = Identity (EBlock (map (runIdentity . visitExpr) es))
   visitExprKind (ECall e es) = Identity (ECall (runIdentity (visitExpr e)) (map (runIdentity . visitExpr) es))
+  visitExprKind (ELambda ps e) = Identity (ELambda (map (runIdentity . visitParam) ps) (runIdentity (visitExpr e)))
   visitExprKind (EField e i) = Identity (EField (runIdentity (visitExpr e)) i)
   visitExprKind (EMethod e i es) = Identity (EMethod (runIdentity (visitExpr e)) i (map (runIdentity . visitExpr) es))
   visitExprKind (ESpawn i es) = Identity (ESpawn i (map (runIdentity . visitExpr) es))
