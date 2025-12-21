@@ -42,6 +42,7 @@ data TypeKind where
   TyOption :: Type -> TypeKind
   TyRecord :: [(Ident, Type)] -> (Maybe Ident) -> TypeKind
   TyKinded :: Ident -> Kind -> TypeKind
+  TyDyn :: Ident -> TypeKind
   deriving (Show, Eq)
 
 data Literal where
@@ -116,6 +117,9 @@ data ExprKind where
   ERefMut :: Expr -> ExprKind
   EAnonRecord :: [(Ident, Expr)] -> ExprKind
   ECast :: Expr -> Type -> ExprKind
+  EVariant :: Ident -> Ident -> [Expr] -> ExprKind
+  EQuestion :: Expr -> ExprKind
+  EComptime :: Expr -> ExprKind
   deriving (Show, Eq)
 
 data MacroBody where
@@ -144,6 +148,7 @@ data DeclKind where
   DTrait :: Ident -> [TypeParam] -> [TraitItem] -> DeclKind
   DImpl :: Ident -> [TypeParam] -> Type -> [ImplItem] -> DeclKind
   DActor :: Ident -> [ActorItem] -> DeclKind
+  DConst :: Ident -> Type -> Expr -> DeclKind
   deriving (Show, Eq)
 
 data TypeParam where
@@ -309,6 +314,7 @@ defaultVisitTypeKind (TyFunc ts t) = TyFunc <$> traverse visitType ts <*> visitT
 defaultVisitTypeKind (TyOption t) = TyOption <$> visitType t
 defaultVisitTypeKind (TyRecord fields m) = TyRecord <$> traverse (\(i, t) -> (,) i <$> visitType t) fields <*> pure m
 defaultVisitTypeKind (TyKinded i k) = TyKinded i <$> visitKind k
+defaultVisitTypeKind (TyDyn i) = pure (TyDyn i)
 
 defaultVisitLiteral :: (Visitor m) => Literal -> m Literal
 defaultVisitLiteral = pure
@@ -356,6 +362,9 @@ defaultVisitExprKind (EMove e) = EMove <$> visitExpr e
 defaultVisitExprKind (ERefMut e) = ERefMut <$> visitExpr e
 defaultVisitExprKind (EAnonRecord fields) = EAnonRecord <$> traverse (\(i, e) -> (,) i <$> visitExpr e) fields
 defaultVisitExprKind (ECast e t) = ECast <$> visitExpr e <*> visitType t
+defaultVisitExprKind (EVariant enumName varName args) = EVariant enumName varName <$> traverse visitExpr args
+defaultVisitExprKind (EQuestion e) = EQuestion <$> visitExpr e
+defaultVisitExprKind (EComptime e) = EComptime <$> visitExpr e
 
 defaultVisitMacroBody :: (Visitor m) => MacroBody -> m MacroBody
 defaultVisitMacroBody (MExprs es) = MExprs <$> traverse visitExpr es
@@ -375,6 +384,7 @@ defaultVisitDeclKind (DEnum i tps vars) = DEnum i <$> traverse visitTypeParam tp
 defaultVisitDeclKind (DTrait i tps items) = DTrait i <$> traverse visitTypeParam tps <*> traverse visitTraitItem items
 defaultVisitDeclKind (DImpl i tps t items) = DImpl i <$> traverse visitTypeParam tps <*> visitType t <*> traverse visitImplItem items
 defaultVisitDeclKind (DActor i items) = DActor i <$> traverse visitActorItem items
+defaultVisitDeclKind (DConst i t e) = DConst i <$> visitType t <*> visitExpr e
 
 defaultVisitTypeParam :: (Visitor m) => TypeParam -> m TypeParam
 defaultVisitTypeParam (TypeParam meta name mk) = TypeParam meta name <$> traverse visitKind mk

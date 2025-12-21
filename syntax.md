@@ -13,7 +13,14 @@ let mut y = 20;
 let z: Float = 3.14;
 ```
 
-### 1.2 Functions
+### 1.2 Constants
+```vial
+const MAX_SIZE: Int = 1024;
+const PI: Float = 3.14159;
+const CONFIG: String = comptime load_config();
+```
+
+### 1.3 Functions
 ```vial
 def add(a: Int, b: Int) -> Int {
     a + b
@@ -23,7 +30,7 @@ def add(a: Int, b: Int) -> Int {
 def id<T>(x: T) -> T { x }
 ```
 
-### 1.3 Structs & Fields
+### 1.4 Structs & Fields
 ```vial
 struct User {
     id: Int,
@@ -37,7 +44,7 @@ user.name
 user.login()
 ```
 
-### 1.4 Enums & Variants
+### 1.5 Enums & Variants
 ```vial
 enum Message {
     Quit,
@@ -45,11 +52,20 @@ enum Message {
     Write(String),
 }
 
-# Variant access
-Message::Quit
+# Variant construction
+let quit = Message::Quit;
+let move_msg = Message::Move { x: 10, y: 20 };
+let write_msg = Message::Write("hello");
+
+# Variant access in patterns
+match msg {
+    Message::Quit => print("Quitting"),
+    Message::Move { x, y } => print("Moving to #{x}, #{y}"),
+    Message::Write(text) => print("Writing: #{text}")
+}
 ```
 
-### 1.5 Actors & Behaviors
+### 1.6 Actors & Behaviors
 ```vial
 actor Clock {
     let mut ticks = 0;
@@ -71,7 +87,7 @@ actor Clock {
 }
 ```
 
-### 1.6 Traits & Implementations
+### 1.7 Traits & Implementations
 ```vial
 trait Container<T> {
     type Item;
@@ -82,9 +98,14 @@ impl Container<List<Int>> {
     type Item = Int;
     def add(self: mut List<Int>, item: Int) { ... }
 }
+
+# Dynamic dispatch
+def process_items(items: dyn Container<Int>) {
+    items.add(42);
+}
 ```
 
-### 1.7 GADTs
+### 1.8 GADTs
 ```vial
 enum Expr<T> {
     Int(Int) : Expr<Int>,
@@ -109,6 +130,22 @@ Macros are invoked with `::`.
 debug::(x);
 sql::"SELECT * FROM users";
 html::{ div { "Hello" } }
+```
+
+### 2.3 Error Propagation
+```vial
+# ? operator for early return
+def process_data(data: Option<String>) -> Result<String, String> {
+    let text = data?;  # Returns None if data is None
+    Result::Ok(text.to_uppercase())
+}
+```
+
+### 2.4 Comptime Expressions
+```vial
+# Compile-time evaluation
+const SIZE: Int = comptime 2 * 1024;
+let config = comptime parse_json_file("config.json");
 ```
 
 ### 2.3 Attributes

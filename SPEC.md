@@ -23,6 +23,14 @@ y = 30;             # OK
 ```
 Shadowing is permitted within the same or nested scopes.
 
+### 1.4 Constants
+Top-level constants are evaluated at compile time and are immutable.
+```vial
+const MAX_CONNECTIONS: Int = 100;
+const API_VERSION: String = "v1.0";
+const TIMEOUT_MS: Int = comptime calculate_timeout();
+```
+
 ---
 
 ## 2. Type System
@@ -52,6 +60,18 @@ enum Expr<T> {
     Add(Expr<Int>, Expr<Int>) : Expr<Int>,
     Eq<A>(Expr<A>, Expr<A>) : Expr<Bool>
 }
+```
+
+### 2.2.1 Enum Variant Construction
+Enum variants can be constructed using the `Enum::Variant` syntax, which provides a dedicated expression form separate from function calls.
+```vial
+enum Option<T> {
+    Some(T),
+    None
+}
+
+let some_val = Option::Some(42);
+let none_val = Option::None;
 ```
 
 ### 2.3 Pattern Matching
@@ -87,6 +107,18 @@ trait Collection<C> {
 }
 ```
 
+### 2.6 Dynamic Dispatch
+Vial supports dynamic dispatch through `dyn Trait` objects.
+```vial
+trait Show {
+    def show(self) -> String;
+}
+
+def print_value(x: dyn Show) {
+    print(x.show());
+}
+```
+
 ### 2.6 Higher-Kinded Types (HKTs)
 Vial supports System Fω style HKTs with explicit kinding.
 ```vial
@@ -114,6 +146,41 @@ def greet<R>(obj: { name: String, .. R }) {
 ### 3.2 Resource Safety (RAII & Defer)
 - **Drop Trait**: Automatic destructor.
 - **Defer**: Scheduled execution.
+
+---
+
+## 4. Error Handling
+
+### 4.1 Result and Option Types
+Vial uses algebraic data types for error handling instead of exceptions.
+```vial
+enum Result<T, E> {
+    Ok(T),
+    Err(E)
+}
+
+enum Option<T> {
+    Some(T),
+    None
+}
+```
+
+### 4.2 The ? Operator
+The `?` operator provides early return for error propagation.
+```vial
+def divide(a: Int, b: Int) -> Result<Int, String> {
+    if b == 0 {
+        return Result::Err("Division by zero");
+    }
+    Result::Ok(a / b)
+}
+
+def safe_calculation(x: Int, y: Int, z: Int) -> Result<Int, String> {
+    let a = divide(x, y)?;
+    let b = divide(a, z)?;
+    Result::Ok(a + b)
+}
+```
 
 ---
 
@@ -164,6 +231,13 @@ comptime {
     let ty = reflect::type_of<User>();
     for field in ty.fields { ... }
 }
+```
+
+### 5.3 Comptime Expressions
+The `comptime` keyword evaluates expressions at compile time.
+```vial
+const MAX_SIZE: Int = comptime calculate_max_size();
+let config = comptime load_config_file();
 ```
 
 ---

@@ -35,6 +35,8 @@ data InferredTypeKind where
   ITyRecord :: [(Ident, InferredType)] -> InferredTypeKind
   -- | Type-level lambda abstraction for type operators (e.g., \a -> List a)
   ITyLam :: Ident -> InferredType -> InferredTypeKind
+  -- | Dynamic trait object (e.g., dyn Show)
+  ITyDyn :: Ident -> InferredTypeKind
   deriving (Show, Eq)
 
 data TypedParam where
@@ -99,6 +101,9 @@ data TypedExprKind where
   TERefMut :: TypedExpr -> TypedExprKind
   TEAnonRecord :: [(Ident, TypedExpr)] -> TypedExprKind
   TECast :: TypedExpr -> InferredType -> TypedExprKind
+  TEVariant :: Ident -> Ident -> [TypedExpr] -> TypedExprKind
+  TEQuestion :: TypedExpr -> TypedExprKind
+  TEComptime :: TypedExpr -> TypedExprKind
   deriving (Show, Eq)
 
 data TypedPattern where
@@ -148,6 +153,7 @@ data TypedDeclKind where
   TDTrait :: Ident -> [AST.TypeParam] -> [TypedTraitItem] -> TypedDeclKind
   TDImpl :: Ident -> [AST.TypeParam] -> InferredType -> [TypedImplItem] -> TypedDeclKind
   TDActor :: Ident -> [TypedActorItem] -> TypedDeclKind
+  TDConst :: Ident -> InferredType -> TypedExpr -> TypedDeclKind
   deriving (Show, Eq)
 
 data TypedTraitItem where
@@ -253,6 +259,7 @@ instance TypedVisitor Untype where
   visitInferredTypeKind (ITyOption t) = AST.TyOption <$> visitInferredType t
   visitInferredTypeKind (ITyRecord fields) = AST.TyRecord <$> traverse (\(i, t) -> (,) i <$> visitInferredType t) fields <*> pure Nothing
   visitInferredTypeKind (ITyLam _ t) = AST.typeKind <$> visitInferredType t -- ignore type lambda for untyping
+  visitInferredTypeKind (ITyDyn i) = pure (AST.TyDyn i)
 
   visitKind Star = pure AST.KStar
   visitKind (KArrow k1 k2) = AST.KArr <$> visitKind k1 <*> visitKind k2
@@ -292,6 +299,9 @@ instance TypedVisitor Untype where
   visitTypedExprKind (TERefMut e) = AST.ERefMut <$> visitTypedExpr e
   visitTypedExprKind (TEAnonRecord fields) = AST.EAnonRecord <$> traverse (\(i, e) -> (,) i <$> visitTypedExpr e) fields
   visitTypedExprKind (TECast e t) = AST.ECast <$> visitTypedExpr e <*> visitInferredType t
+  visitTypedExprKind (TEVariant enumName varName args) = AST.EVariant enumName varName <$> traverse visitTypedExpr args
+  visitTypedExprKind (TEQuestion e) = AST.EQuestion <$> visitTypedExpr e
+  visitTypedExprKind (TEComptime e) = AST.EComptime <$> visitTypedExpr e
 
   visitTypedPattern (TypedPattern meta _ kind) = AST.Pattern meta <$> visitTypedPatternKind kind
 
@@ -311,6 +321,7 @@ instance TypedVisitor Untype where
   visitTypedDeclKind (TDTrait i tps items) = AST.DTrait i tps <$> traverse visitTypedTraitItem items
   visitTypedDeclKind (TDImpl i tps t items) = AST.DImpl i tps <$> visitInferredType t <*> traverse visitTypedImplItem items
   visitTypedDeclKind (TDActor i items) = AST.DActor i <$> traverse visitTypedActorItem items
+  visitTypedDeclKind (TDConst i t e) = AST.DConst i <$> visitInferredType t <*> visitTypedExpr e
 
   visitTypedTraitItem (TypedTraitItem meta kind) = AST.TraitItem meta <$> visitTypedTraitItemKind kind
 
