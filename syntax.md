@@ -133,6 +133,10 @@ match val {
 
 # For
 for i in 1..10 { print(i); }
+
+# Lambda expressions
+let add = |x, y| -> x + y;
+let identity = |x| -> x;
 ```
 
 ---
