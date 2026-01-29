@@ -17,7 +17,7 @@ pub enum TypeVariant {
     },
     Tuple(Vec<Type>),
     Record(Vec<(String, Type)>),
-    Enum(Vec<(String, Vec<Type>)>), // todo: handle enum variants
+    Enum(Vec<TypedEnumVariant>),
     TypeVar(TypeVariable),
     TypeConstructorVar(TypeVariable),
     // associated type projection
@@ -307,7 +307,6 @@ pub struct TypedTypeAlias {
 pub struct TypedStructField {
     pub name: String,
     pub type_: Type,
-    pub ty: Type,
 }
 
 #[derive(Debug, Clone)]
@@ -582,6 +581,5 @@ pub struct TypedAssociatedType {
 pub struct TypedFunctionArg {
     pub name: String,
     pub type_: Type,
-    pub arg_type: Type,
     pub is_self: bool, // is this the self parameter?
 }
