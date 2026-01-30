@@ -51,7 +51,7 @@ Everything is pub
 Traits
 ======
 
-- [ ] `trait name[generic1, generic2] { type name = type1, myfun[generic3] (arg1: type1, arg2: type2, ...) -> return_type, myfun2 (arg1: type1, arg2: type2, ...) -> return_type, ...}`
+- [ ] `trait name[generic1, generic2] { type name = type1, myfun[generic3] arg1: type1, arg2: type2, ... -> return_type, myfun2 arg1: type1, arg2: type2, ... -> return_type, ...}`
 
 Comptime Functions
 ======
