@@ -1,0 +1,14 @@
+// Test file for pipe operators
+main _ = {
+    let x = 5 |> add_one;
+    let y = 5 |> add_one;
+    let z = [1, 2, 3] |> length;
+    let w = [1, 2, 3] |> map;
+    println("Testing pipes");
+}
+
+add_one x = x + 1
+
+length arr = len(arr)
+
+map f, arr = arr.map(f)

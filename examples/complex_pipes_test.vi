@@ -1,0 +1,21 @@
+// Test file for complex pipe operators
+main _ = {
+    let x = 5 |> add_one |> mul_by_two;
+    let y = [1, 2, 3] |> map(add_one) |> length;
+    let z = [1, 2, 3] |> filter(gt_zero) |> map(double) |> length;
+    println("Complex pipes test");
+}
+
+add_one x = x + 1
+
+mul_by_two x = x * 2
+
+double x = x * 2
+
+gt_zero x = x > 0
+
+map f, arr = arr.map(f)
+
+filter f, arr = arr.filter(f)
+
+length arr = len(arr)

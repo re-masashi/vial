@@ -2,6 +2,7 @@ use logos::Logos;
 use std::env;
 use std::fs;
 
+use vial::desugar::desugar_ast;
 use vial::lexer::Token;
 use vial::parser::Parser;
 
@@ -37,8 +38,10 @@ fn main() {
     let mut parser = Parser::new(tokens, file_path.clone());
     match parser.parse_program() {
         Ok(ast) => {
-            println!("Successfully parsed:");
-            println!("{:#?}", ast);
+            // Desugar the AST (convert pipes to calls)
+            let desugared_ast = desugar_ast(ast);
+            println!("Successfully parsed and desugared:");
+            println!("{:#?}", desugared_ast);
         }
         Err(err) => {
             eprintln!("Parsing error at {}: {}", err.location.file, err.message);
