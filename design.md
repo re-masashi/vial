@@ -45,8 +45,8 @@ File = Module
 Everything is pub
 
 - [ ] `use "some/file" ` (import all)
-- [ ] `use "some/file" { name1, name2, ... }`
-- [ ] `use "some/file" {name1 as alias1, name2, name3 as alias ...}`
+- [ ] `use "some/file" ( name1, name2, ... )`
+- [ ] `use "some/file" ( name1 as alias1, name2, name3 as alias ... )`
 
 Traits
 ======
@@ -203,9 +203,9 @@ impl Show for Person {
 impl Show for Color {
     fn show(self) -> str {
         match self {
-            White => return "White",
-            Black => return "Black",
-            RGB(r, g, b) => return "RGB(" + str(r) + ", " + str(g) + ", " + str(b) + ")",
+            Color::White => return "White",
+            Color::Black => return "Black",
+            Color::RGB(r, g, b) => return "RGB(" + str(r) + ", " + str(g) + ", " + str(b) + ")",
         }
     }
 }

@@ -405,9 +405,9 @@ impl Parser {
             }
         };
 
-        let imports = if self.match_token(Token::LBrace) {
+        let imports = if self.match_token(Token::LParen) {
             let mut items = Vec::new();
-            if !self.check(&Token::RBrace) {
+            if !self.check(&Token::RParen) {
                 loop {
                     let name = self.parse_identifier()?;
                     let alias = if self.match_token(Token::As) {
@@ -421,7 +421,7 @@ impl Parser {
                     }
                 }
             }
-            self.expect(Token::RBrace)?;
+            self.expect(Token::RParen)?;
             Some(items)
         } else {
             None
@@ -604,33 +604,46 @@ impl Parser {
             loop {
                 let name = self.parse_identifier()?;
 
-                // Parse kind annotation
-                let kind = if self.match_token(Token::Colon) {
-                    self.parse_kind_annotation()?
-                } else {
-                    KindAnnot::Star
-                };
+                // Parse kind annotation and trait constraints
+                let (kind, trait_constraints) = if self.match_token(Token::Colon) {
+                    // Check the next token to decide between kind annotation and trait constraint
+                    if self.check(&Token::Star) {
+                        // This is a kind annotation like * or *->*
+                        let parsed_kind = self.parse_kind_annotation()?;
 
-                // Parse trait bounds
-                let bounds = Vec::new();
-                let mut trait_constraints = Vec::new();
-
-                // Check for "and" keyword followed by trait bounds
-                if let Some(Token::Identifier(id)) = self.peek()
-                    && id == "and" {
-                        self.advance(); // consume "and"
-                        loop {
-                            trait_constraints.push(self.parse_type_annotation()?);
-                            if !self.match_token(Token::Plus) {
-                                break;
+                        // Check if there are trait constraints after the kind annotation using + syntax
+                        let trait_constraints = if self.match_token(Token::Plus) {
+                            let mut constraints = vec![self.parse_type_annotation()?];
+                            while self.match_token(Token::Plus) {
+                                constraints.push(self.parse_type_annotation()?);
                             }
+                            constraints
+                        } else {
+                            Vec::new()
+                        };
+                        (parsed_kind, trait_constraints)
+                    } else {
+                        // It's a trait constraint like Functor, MyTrait, etc.
+                        // Parse it as a type annotation (can be simple or complex)
+                        let trait_constraint = self.parse_type_annotation()?;
+                        let mut trait_constraints = vec![trait_constraint];
+
+                        // Parse additional trait constraints with +
+                        while self.match_token(Token::Plus) {
+                            trait_constraints.push(self.parse_type_annotation()?);
                         }
+
+                        (KindAnnot::Star, trait_constraints) // Use Star for trait constraints
                     }
+                } else {
+                    // No colon, default to Star kind with no constraints
+                    (KindAnnot::Star, Vec::new())
+                };
 
                 params.push(GenericParam {
                     name,
                     kind,
-                    bounds,
+                    bounds: Vec::new(), // Initialize bounds as empty
                     trait_constraints,
                 });
 
@@ -978,6 +991,14 @@ impl Parser {
 
     fn parse_type_annotation_atom(&mut self) -> ParseResult<Node<TypeAnn>> {
         let start = self.current_span().start;
+
+        if self.match_token(Token::SelfType) {
+            let span = self.span_from(start);
+            return Ok(Node {
+                data: TypeAnn::Primary("Self".to_string(), Vec::new()),
+                meta: self.make_meta(span, Vec::new()),
+            });
+        }
 
         let name = self.parse_identifier()?;
 
@@ -1978,14 +1999,15 @@ impl Parser {
 
         // Wildcard
         if let Some(Token::Identifier(id)) = self.peek()
-            && id == "_" {
-                self.advance();
-                let span = self.span_from(start);
-                return Ok(Node {
-                    data: Pat::Wildcard,
-                    meta: self.make_meta(span, Vec::new()),
-                });
-            }
+            && id == "_"
+        {
+            self.advance();
+            let span = self.span_from(start);
+            return Ok(Node {
+                data: Pat::Wildcard,
+                meta: self.make_meta(span, Vec::new()),
+            });
+        }
 
         // Literals
         if let Some(Token::Integer(i)) = self.peek() {
@@ -2238,11 +2260,12 @@ impl Parser {
         while !self.check(&Token::RBrace) {
             // Check for wildcard
             if let Some(Token::Identifier(id)) = self.peek()
-                && id == "_" {
-                    self.advance();
-                    // Wildcard in struct pattern - ignore remaining fields
-                    break;
-                }
+                && id == "_"
+            {
+                self.advance();
+                // Wildcard in struct pattern - ignore remaining fields
+                break;
+            }
 
             let name = self.parse_identifier()?;
 
@@ -2280,7 +2303,7 @@ mod tests {
     use logos::Logos;
 
     fn parse(input: &str) -> ParseResult<Program> {
-        let mut lex = Token::lexer(input);
+        let lex = Token::lexer(input);
         let mut tokens = Vec::new();
 
         for (tok, span) in lex.spanned() {

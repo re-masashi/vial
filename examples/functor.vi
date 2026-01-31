@@ -1,0 +1,13 @@
+trait Functor[F: *->*] {
+    fmap[A, B] self, f: fn(A) -> B, -> Self
+}
+
+double[F: Functor] container: (F[int]) -> F[int] = 
+  container.fmap(fn(x: int) -> int x * 2 )
+
+identity x = x
+
+main _ = {
+  [1, 2, 3] |> double |> println
+  (Option::Some(1) |> double ).to_string() |> println
+}

@@ -1,0 +1,14 @@
+extern puts(str) -> ()
+extern exit(int) -> ()
+extern sin(float) -> float
+extern cos(float) -> float
+extern sqrt(float) -> float
+extern pow(float, float) -> float
+extern abs(int) -> int
+extern log(float) -> float
+
+use "ctypes" (str, float, int)
+
+main _ = {
+    puts("hi")
+}

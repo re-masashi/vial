@@ -1,0 +1,24 @@
+
+@derive(Debug)
+type Tree[T] = Leaf(T) | Node(Tree, Tree)
+
+array_to_tree arr: Array[T] -> Tree[T] = match (arr) {
+    [] => Tree::Leaf(0),
+    [x] => Tree::Leaf(x),
+    [x, ..xs] => Tree::Node(Tree::Leaf(x), array_to_tree(xs)),
+}
+
+is_in_tree tree: Tree[T] -> bool = match (tree) {
+    Tree::Leaf(x) => true,
+    Tree::Node(left, right) => match (is_in_tree(left), is_in_tree(right)) {
+        (Option::Some(x), _) 
+        | (_, Option::Some(x)) => true,
+        _ => false,
+    },
+}
+
+main _ =
+  (array_to_tree([1, 2, 3, 4, 5])
+  |> is_in_tree).to_string()
+  |> println
+
