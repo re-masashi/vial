@@ -40,7 +40,6 @@ fn main() {
         Ok(ast) => {
             // Desugar the AST (convert pipes to calls)
             let desugared_ast = desugar_ast(ast);
-            println!("Successfully parsed and desugared:");
             println!("{:#?}", desugared_ast);
         }
         Err(err) => {

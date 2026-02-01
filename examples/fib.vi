@@ -1,3 +1,3 @@
 fib n = if n < 2 then n else fib(n-1) + fib(n-2)
 
-main _ = println(fib(10).to_string())
+main _ = fib(10)

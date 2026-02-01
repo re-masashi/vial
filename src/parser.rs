@@ -251,7 +251,7 @@ impl Parser {
         match self.advance() {
             Some(Token::Identifier(id)) => Ok(id),
             x => {
-                println!("{:?}", x);
+                // println!("{:?}", x);
                 Err(ParseError::new(
                     format!("Expected identifier. found {:?} ", x).to_string(),
                     Location {
@@ -439,7 +439,7 @@ impl Parser {
             Vec::new()
         };
 
-        print!("1 ");
+        // // print!("1 ");
 
         // Parse supertrait bounds (inherits)
         let mut inherits = Vec::new();
@@ -452,21 +452,21 @@ impl Parser {
             }
         }
 
-        print!("2 ");
+        // // print!("2 ");
         self.expect(Token::LBrace)?;
         let mut items = Vec::new();
 
-        print!("3 ");
+        // // print!("3 ");
         while !self.check(&Token::RBrace) {
             let start = self.current_span().start;
             let item_attrs = self.parse_attributes()?;
 
-            print!("4 ");
+            // // print!("4 ");
 
             let item = if self.match_token(Token::Type) {
                 TraitItem::TypeAlias(self.parse_type_alias()?)
             } else if matches!(self.peek(), Some(&Token::Identifier(_))) {
-                print!("4.5 ");
+                // print!("4.5 ");
 
                 TraitItem::FunctionSignature(self.parse_function_signature()?)
             } else {
@@ -479,7 +479,7 @@ impl Parser {
                 ));
             };
 
-            print!("5 ");
+            // print!("5 ");
 
             let span = self.span_from(start);
             items.push(Node {
@@ -504,7 +504,7 @@ impl Parser {
     fn parse_function_signature(&mut self) -> ParseResult<FunctionSignature> {
         let name = self.parse_identifier()?;
 
-        print!("pfs 1 ");
+        // print!("pfs 1 ");
 
         let generics = if self.match_token(Token::LBracket) {
             self.parse_generic_params()?
@@ -512,11 +512,11 @@ impl Parser {
             Vec::new()
         };
 
-        print!("pfs 2 ");
+        // print!("pfs 2 ");
 
         let params = self.parse_function_params()?;
 
-        print!("pfs 2.5 ");
+        // print!("pfs 2.5 ");
 
         let return_type = if self.match_token(Token::Arrow) {
             Some(self.parse_type_annotation()?)
@@ -524,7 +524,7 @@ impl Parser {
             None
         };
 
-        print!("pfs 3 ");
+        // print!("pfs 3 ");
 
         Ok(FunctionSignature {
             name,
@@ -684,7 +684,7 @@ impl Parser {
     fn parse_function_params(&mut self) -> ParseResult<Vec<FunctionArg>> {
         let mut params = Vec::new();
 
-        print!("pfp 1 ");
+        // print!("pfp 1 ");
 
         // Handle self parameter
         if self.match_token(Token::SelfValue) {
@@ -703,19 +703,19 @@ impl Parser {
             }
         }
 
-        print!("pfp 2 ");
+        // print!("pfp 2 ");
         // Parse regular parameters
         loop {
             // Check if we're at the end (= or ->)
-            print!("pfp 3 ");
+            // print!("pfp 3 ");
             if self.check(&Token::Eq) || self.check(&Token::Arrow) {
                 break;
             }
 
-            print!("pfp 4 ");
+            // print!("pfp 4 ");
 
             let name = self.parse_identifier()?;
-            print!("pfp 5 ");
+            // print!("pfp 5 ");
 
             let type_ann = if self.match_token(Token::Colon) {
                 Some(self.parse_type_annotation()?)
@@ -723,7 +723,7 @@ impl Parser {
                 None
             };
 
-            print!("pfp 6 ");
+            // print!("pfp 6 ");
             params.push(FunctionArg { name, type_ann });
 
             if !self.match_token(Token::Comma) {
@@ -1061,15 +1061,11 @@ impl Parser {
     }
 
     fn parse_expr(&mut self) -> ParseResult<Node<Expr>> {
-        self.parse_expr_assignment()
-    }
-
-    fn parse_expr_assignment(&mut self) -> ParseResult<Node<Expr>> {
         let start = self.current_span().start;
         let expr = self.parse_expr_pipe()?;
 
         if self.match_token(Token::Eq) {
-            let right = self.parse_expr_assignment()?;
+            let right = self.parse_expr()?;
             let span = self.span_from(start);
             return Ok(Node {
                 data: Expr::Assign {
@@ -1620,21 +1616,21 @@ impl Parser {
 
         // Match expression
         if self.match_token(Token::Match) {
-            print!("pm 0");
+            // print!("pm 0");
             let expr = self.parse_expr()?;
 
-            print!("pm 1");
+            // print!("pm 1");
             self.expect(Token::LBrace)?;
 
-            print!("pm 2");
+            // print!("pm 2");
             let mut arms = Vec::new();
             while !self.check(&Token::RBrace) {
                 let pattern = self.parse_pattern()?;
-                print!("pm 3");
+                // print!("pm 3");
                 self.expect(Token::FatArrow)?;
-                print!("pm 4");
+                // print!("pm 4");
                 let body = self.parse_expr()?;
-                print!("pm 5");
+                // print!("pm 5");
                 arms.push(MatchArm { pattern, body });
 
                 // Optional comma
@@ -1642,7 +1638,7 @@ impl Parser {
             }
 
             self.expect(Token::RBrace)?;
-            print!("pm 6");
+            // print!("pm 6");
             let span = self.span_from(start);
             return Ok(Node {
                 data: Expr::Match {
@@ -1832,6 +1828,15 @@ impl Parser {
                     method,
                     args,
                 },
+                meta: self.make_meta(span, Vec::new()),
+            });
+        }
+
+        if let Some(Token::SelfValue) = self.peek() {
+            self.advance();
+            let span = self.span_from(start);
+            return Ok(Node {
+                data: Expr::Variable("self".to_string()),
                 meta: self.make_meta(span, Vec::new()),
             });
         }
@@ -2133,7 +2138,7 @@ impl Parser {
             let mut patterns = Vec::new();
             let mut rest = None;
 
-            print!("pap 0");
+            // print!("pap 0");
 
             if !self.check(&Token::RBracket) {
                 loop {
@@ -2141,12 +2146,12 @@ impl Parser {
                     if self.match_token(Token::DotDot) {
                         // Optional identifier for rest
                         rest = if let Some(Token::Identifier(_)) = self.peek() {
-                            print!("pap 1");
+                            // print!("pap 1");
                             Some(self.parse_identifier()?)
                         } else {
                             None
                         };
-                        print!("pap 2");
+                        // print!("pap 2");
 
                         // No more patterns after rest
                         self.match_token(Token::Comma);
@@ -2155,7 +2160,7 @@ impl Parser {
 
                     patterns.push(self.parse_pattern()?);
 
-                    print!("pap 3");
+                    // print!("pap 3");
                     if !self.match_token(Token::Comma) {
                         break;
                     }

@@ -2,12 +2,23 @@ trait Functor[F: *->*] {
     fmap[A, B] self, f: fn(A) -> B, -> Self
 }
 
+type MyOption[A] = Some(A) | None
+
 double[F: Functor] container: (F[int]) -> F[int] = 
   container.fmap(fn(x: int) -> int x * 2 )
+
+impl Functor for MyOption {
+  fmap[A, B] self, f: fn(A) -> B, -> Self = {
+    match (self) {
+      MyOption::Some(x) => MyOption::Some(f(x)),
+      MyOption::None => MyOption::None
+    }
+  }
+}
 
 identity x = x
 
 main _ = {
-  [1, 2, 3] |> double |> println
-  (Option::Some(1) |> double ).to_string() |> println
+  // [1, 2, 3] |> double
+  (MyOption::Some(1) |> double )
 }

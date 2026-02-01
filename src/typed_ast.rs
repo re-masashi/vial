@@ -242,6 +242,13 @@ impl Type {
         std::mem::discriminant(&self.type_variant) == std::mem::discriminant(&other.type_variant)
     }
 
+    pub fn get_trait_constraint_name(&self) -> Option<String> {
+        match &self.type_variant {
+            TypeVariant::TraitConstraint { trait_name, .. } => Some(trait_name.clone()),
+            _ => None,
+        }
+    }
+
     pub fn new_star_type(type_variant: TypeVariant) -> Self {
         Type {
             type_variant,
@@ -557,6 +564,13 @@ pub enum Kind {
     Star,
     // K1 -> K2
     Arrow(Box<Kind>, Box<Kind>),
+    Var(KindVariable),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct KindVariable {
+    pub id: usize,
+    pub name: String,
 }
 
 #[derive(Debug, Clone)]
